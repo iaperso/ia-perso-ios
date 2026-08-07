@@ -5,13 +5,24 @@ import com.iaperso.core.model.LocalModel
 
 interface LocalAIEngine {
     val loadedTextModel: LocalModel?
+    val loadedImageModel: LocalModel?
+    val loadedSpeechModel: LocalModel?
 
     suspend fun loadTextModel(
         model: LocalModel,
         settings: GenerationSettings = GenerationSettings(),
     ): Result<Unit>
 
+    suspend fun loadImageModel(
+        model: LocalModel,
+        threads: Int = -1,
+    ): Result<Unit>
+
+    suspend fun loadSpeechModel(model: LocalModel): Result<Unit>
+
     suspend fun unloadTextModel()
+    suspend fun unloadImageModel()
+    suspend fun unloadSpeechModel()
 
     suspend fun generateText(
         systemPrompt: String?,
@@ -64,8 +75,9 @@ data class ImageGenerationSettings(
 )
 
 data class GeneratedImage(
-    val localPath: String,
+    val rgbaBytes: ByteArray,
     val width: Int,
     val height: Int,
     val seed: Long? = null,
+    val localPath: String? = null,
 )
