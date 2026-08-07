@@ -2,6 +2,7 @@ package com.iaperso.core.repository
 
 import com.iaperso.core.model.LocalModel
 import com.iaperso.core.model.ModelCapability
+import com.iaperso.core.model.ModelState
 import com.russhwolf.settings.Settings
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -44,6 +45,22 @@ class SettingsModelRepository(
             }
         }
         settings.putString(activeKey(capability), modelId.orEmpty())
+        normalizeReadyState(capability, modelId)
+    }
+
+    private fun normalizeReadyState(capability: ModelCapability, activeId: String?) {
+        val normalized = readAll().map { model ->
+            if (model.capability != capability) {
+                model
+            } else {
+                when {
+                    model.id == activeId -> model.copy(state = ModelState.READY, errorMessage = null)
+                    model.state == ModelState.READY -> model.copy(state = ModelState.INSTALLED)
+                    else -> model
+                }
+            }
+        }
+        writeAll(normalized)
     }
 
     private fun activeId(capability: ModelCapability): String? =
