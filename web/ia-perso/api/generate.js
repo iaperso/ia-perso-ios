@@ -23,15 +23,27 @@ function modelFor(size) {
     : '@cf/black-forest-labs/flux-2-klein-4b';
 }
 
-function cacheKey(requestId) {
-  return `ia-perso:${crypto.createHash('sha256').update(requestId).digest('hex')}`;
+function hash(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function requestFingerprint(prompt, size) {
+  return hash(`${size}\n${prompt}`);
+}
+
+function cacheKey(requestId, fingerprint) {
+  return `ia-perso:${hash(`${requestId}:${fingerprint}`)}`;
+}
+
+function seedFor(requestId) {
+  return parseInt(hash(requestId).slice(0, 8), 16) >>> 0;
 }
 
 function extractBase64(payload) {
   return payload?.result?.image || payload?.image || payload?.result?.result?.image || null;
 }
 
-async function callCloudflare({ prompt, size, requestId }) {
+async function callCloudflare({ prompt, size, requestId, fingerprint }) {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
   const gatewayId = process.env.CLOUDFLARE_AI_GATEWAY_ID || 'default';
@@ -42,22 +54,25 @@ async function callCloudflare({ prompt, size, requestId }) {
   const headers = {
     Authorization: `Bearer ${token}`,
     'cf-aig-gateway-id': gatewayId,
-    'cf-aig-cache-key': cacheKey(requestId),
+    'cf-aig-cache-key': cacheKey(requestId, fingerprint),
     'cf-aig-cache-ttl': String(CACHE_TTL_SECONDS),
     'cf-aig-max-attempts': '1',
     'cf-aig-collect-log': 'true',
+    'cf-aig-collect-log-payload': 'false',
     'cf-aig-metadata': JSON.stringify({ app: 'ia-perso', requestId, size, model })
   };
 
+  const seed = seedFor(requestId);
   let body;
   if (model.includes('flux-2-klein')) {
     body = new FormData();
     body.append('prompt', prompt);
     body.append('width', String(size));
     body.append('height', String(size));
+    body.append('seed', String(seed));
   } else {
     headers['Content-Type'] = 'application/json';
-    body = JSON.stringify({ prompt, width: size, height: size, steps: 4, seed: Math.floor(Math.random() * 2147483647) });
+    body = JSON.stringify({ prompt, width: size, height: size, steps: 4, seed });
   }
 
   const response = await fetch(endpoint, { method: 'POST', headers, body });
@@ -76,14 +91,30 @@ async function callCloudflare({ prompt, size, requestId }) {
 }
 
 function pollinationsUrl(prompt, size, requestId) {
-  const seed = parseInt(crypto.createHash('sha256').update(requestId).digest('hex').slice(0, 8), 16) >>> 0;
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${size}&height=${size}&model=flux&safe=true&seed=${seed}`;
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${size}&height=${size}&model=flux&safe=true&seed=${seedFor(requestId)}`;
 }
 
-async function generateOnce({ prompt, size, requestId }) {
-  const cloudflare = await callCloudflare({ prompt, size, requestId });
+async function generateOnce({ prompt, size, requestId, fingerprint }) {
+  const cloudflare = await callCloudflare({ prompt, size, requestId, fingerprint });
   if (cloudflare) return cloudflare;
-  return { imageUrl: pollinationsUrl(prompt, Math.min(size, 768), requestId), provider: 'pollinations', model: 'flux', size: Math.min(size, 768), degraded: true };
+  const fallbackSize = Math.min(size, 768);
+  return {
+    imageUrl: pollinationsUrl(prompt, fallbackSize, requestId),
+    provider: 'pollinations',
+    model: 'flux',
+    size: fallbackSize,
+    degraded: true
+  };
+}
+
+function pruneCompleted(now = Date.now()) {
+  for (const [key, entry] of completed) {
+    if (now - entry.at >= CACHE_TTL_SECONDS * 1000) completed.delete(key);
+  }
+  if (completed.size > 100) {
+    const oldest = [...completed.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, completed.size - 100);
+    for (const [key] of oldest) completed.delete(key);
+  }
 }
 
 export default async function handler(req, res) {
@@ -96,22 +127,32 @@ export default async function handler(req, res) {
   if (!prompt) return json(res, 400, { error: 'Prompt vide.' });
   if (!/^[a-zA-Z0-9_-]{12,128}$/.test(requestId)) return json(res, 400, { error: 'requestId invalide.' });
 
+  const fingerprint = requestFingerprint(prompt, requestedSize);
+  pruneCompleted();
+
   const old = completed.get(requestId);
-  if (old && Date.now() - old.at < CACHE_TTL_SECONDS * 1000) return json(res, 200, { ...old.value, cached: true });
-  if (inFlight.has(requestId)) {
-    try { return json(res, 200, { ...(await inFlight.get(requestId)), shared: true }); }
+  if (old) {
+    if (old.fingerprint !== fingerprint) {
+      return json(res, 409, { error: 'requestId déjà utilisé avec une autre demande.' });
+    }
+    return json(res, 200, { ...old.value, cached: true });
+  }
+
+  const current = inFlight.get(requestId);
+  if (current) {
+    if (current.fingerprint !== fingerprint) {
+      return json(res, 409, { error: 'requestId déjà utilisé avec une autre demande.' });
+    }
+    try { return json(res, 200, { ...(await current.task), shared: true }); }
     catch (error) { return json(res, Number(error?.status) || 502, { error: error?.message || 'Échec de génération.' }); }
   }
 
-  const task = generateOnce({ prompt, size: requestedSize, requestId });
-  inFlight.set(requestId, task);
+  const task = generateOnce({ prompt, size: requestedSize, requestId, fingerprint });
+  inFlight.set(requestId, { fingerprint, task });
   try {
     const value = await task;
-    completed.set(requestId, { at: Date.now(), value });
-    if (completed.size > 100) {
-      const oldest = [...completed.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, 20);
-      for (const [key] of oldest) completed.delete(key);
-    }
+    completed.set(requestId, { at: Date.now(), fingerprint, value });
+    pruneCompleted();
     return json(res, 200, value);
   } catch (error) {
     console.error('generation_failed', { requestId, message: error?.message, status: error?.status });
