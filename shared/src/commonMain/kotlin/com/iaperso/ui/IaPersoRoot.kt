@@ -37,6 +37,7 @@ import kotlin.random.Random
 @Composable
 fun IaPersoRoot(
     importLocalModel: suspend (ModelCapability) -> LocalModel?,
+    removeLocalModelFile: (LocalModel) -> Result<Unit>,
 ) {
     val scope = rememberCoroutineScope()
     val conversationsRepository = remember { SettingsConversationRepository() }
@@ -378,19 +379,35 @@ fun IaPersoRoot(
                 onLoad = { model -> scope.launch { loadModel(model) } },
                 onRemove = { model ->
                     scope.launch {
-                        withContext(Dispatchers.Default) {
-                            when (model.capability) {
-                                ModelCapability.TEXT_GENERATION -> {
-                                    if (engine.loadedTextModel?.id == model.id) engine.unloadTextModel()
-                                }
-                                ModelCapability.IMAGE_GENERATION -> {
-                                    if (engine.loadedImageModel?.id == model.id) engine.unloadImageModel()
-                                }
-                                ModelCapability.SPEECH_TO_TEXT -> {
-                                    if (engine.loadedSpeechModel?.id == model.id) engine.unloadSpeechModel()
+                        errorMessage = null
+                        val unloadResult = runCatching {
+                            withContext(Dispatchers.Default) {
+                                when (model.capability) {
+                                    ModelCapability.TEXT_GENERATION -> {
+                                        if (engine.loadedTextModel?.id == model.id) engine.unloadTextModel()
+                                    }
+                                    ModelCapability.IMAGE_GENERATION -> {
+                                        if (engine.loadedImageModel?.id == model.id) engine.unloadImageModel()
+                                    }
+                                    ModelCapability.SPEECH_TO_TEXT -> {
+                                        if (engine.loadedSpeechModel?.id == model.id) engine.unloadSpeechModel()
+                                    }
                                 }
                             }
                         }
+                        if (unloadResult.isFailure) {
+                            errorMessage = unloadResult.exceptionOrNull()?.message ?: "Impossible de libérer le modèle"
+                            return@launch
+                        }
+
+                        val deleteResult = withContext(Dispatchers.Default) {
+                            removeLocalModelFile(model)
+                        }
+                        if (deleteResult.isFailure) {
+                            errorMessage = deleteResult.exceptionOrNull()?.message ?: "Impossible de supprimer le fichier du modèle"
+                            return@launch
+                        }
+
                         modelsRepository.remove(model.id)
                         refreshModels()
                     }
