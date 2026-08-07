@@ -28,6 +28,12 @@ class LlamatikLocalAIEngine : LocalAIEngine {
         }
 
         applyTextSettings(settings)
+        if (loadedTextModel?.id == model.id) return@runCatching
+        if (loadedTextModel != null) {
+            LlamaBridge.shutdown()
+            loadedTextModel = null
+        }
+
         val modelPath = model.localPath ?: LlamaBridge.getModelPath(model.fileName)
         check(LlamaBridge.initGenerateModel(modelPath)) {
             "Unable to load text model: ${model.displayName}"
@@ -43,6 +49,12 @@ class LlamatikLocalAIEngine : LocalAIEngine {
             "Model ${model.id} is not an image-generation model"
         }
 
+        if (loadedImageModel?.id == model.id) return@runCatching
+        if (loadedImageModel != null) {
+            StableDiffusionBridge.release()
+            loadedImageModel = null
+        }
+
         val modelPath = model.localPath ?: StableDiffusionBridge.getModelPath(model.fileName)
         check(StableDiffusionBridge.initModel(modelPath, threads)) {
             "Unable to load image model: ${model.displayName}"
@@ -53,6 +65,12 @@ class LlamatikLocalAIEngine : LocalAIEngine {
     override suspend fun loadSpeechModel(model: LocalModel): Result<Unit> = runCatching {
         require(model.capability == ModelCapability.SPEECH_TO_TEXT) {
             "Model ${model.id} is not a speech-to-text model"
+        }
+
+        if (loadedSpeechModel?.id == model.id) return@runCatching
+        if (loadedSpeechModel != null) {
+            WhisperBridge.release()
+            loadedSpeechModel = null
         }
 
         val modelPath = model.localPath ?: WhisperBridge.getModelPath(model.fileName)
