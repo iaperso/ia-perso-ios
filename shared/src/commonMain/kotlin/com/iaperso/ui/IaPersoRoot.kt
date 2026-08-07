@@ -28,6 +28,8 @@ import com.iaperso.ui.image.rgbaToPreviewImageBitmap
 import com.iaperso.ui.models.IaPersoModelsScreen
 import com.iaperso.ui.voice.IaPersoVoiceScreen
 import com.iaperso.ui.voice.IaPersoVoiceUiState
+import com.llamatik.app.platform.AudioPaths
+import com.llamatik.app.platform.AudioRecorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,6 +45,7 @@ fun IaPersoRoot(
     val conversationsRepository = remember { SettingsConversationRepository() }
     val modelsRepository = remember { SettingsModelRepository() }
     val engine = remember { LlamatikLocalAIEngine() }
+    val audioRecorder = remember { AudioRecorder() }
     val chatService = remember {
         ChatService(
             engine = engine,
@@ -69,6 +72,7 @@ fun IaPersoRoot(
     var generatedImageWidth by remember { mutableStateOf(0) }
     var generatedImageHeight by remember { mutableStateOf(0) }
     var imageErrorMessage by remember { mutableStateOf<String?>(null) }
+    var isRecording by remember { mutableStateOf(false) }
     var isTranscribing by remember { mutableStateOf(false) }
     var transcript by remember { mutableStateOf("") }
     var voiceErrorMessage by remember { mutableStateOf<String?>(null) }
@@ -193,7 +197,29 @@ fun IaPersoRoot(
         return engine.loadedSpeechModel != null
     }
 
+    suspend fun transcribePath(audioPath: String, cleanupImportedWav: Boolean) {
+        isTranscribing = true
+        val result = withContext(Dispatchers.Default) {
+            engine.transcribeAudio(audioPath)
+        }
+        result.onSuccess { transcription ->
+            transcript = transcription.text
+        }.onFailure { failure ->
+            voiceErrorMessage = failure.message ?: "La transcription a échoué"
+        }
+        if (cleanupImportedWav) {
+            withContext(Dispatchers.Default) {
+                LocalAudioPicker.cleanup(audioPath)
+            }
+        }
+        isTranscribing = false
+    }
+
     suspend fun returnToChat() {
+        if (isRecording) {
+            runCatching { audioRecorder.stop() }
+            isRecording = false
+        }
         if (activeTextModel != null) {
             ensureTextModelLoaded()
         }
@@ -368,12 +394,48 @@ fun IaPersoRoot(
             IaPersoVoiceScreen(
                 state = IaPersoVoiceUiState(
                     activeModelName = engine.loadedSpeechModel?.displayName,
+                    isRecording = isRecording,
                     isTranscribing = isTranscribing,
                     transcript = transcript,
                     errorMessage = voiceErrorMessage,
                 ),
                 onBack = { scope.launch { returnToChat() } },
                 onOpenModels = { route = IaPersoRoute.MODELS },
+                onStartRecording = {
+                    scope.launch {
+                        voiceErrorMessage = null
+                        if (!ensureSpeechModelLoaded()) {
+                            voiceErrorMessage = "Charge d’abord un modèle Whisper dans Modèles."
+                            return@launch
+                        }
+                        val result = runCatching {
+                            audioRecorder.start(AudioPaths.tempWavPath())
+                        }
+                        result.onSuccess {
+                            isRecording = true
+                        }.onFailure { failure ->
+                            voiceErrorMessage = failure.message ?: "Impossible de démarrer le microphone"
+                            isRecording = false
+                        }
+                    }
+                },
+                onStopAndTranscribe = {
+                    scope.launch {
+                        voiceErrorMessage = null
+                        val audioPath = runCatching { audioRecorder.stop() }
+                            .getOrElse { failure ->
+                                isRecording = false
+                                voiceErrorMessage = failure.message ?: "Impossible d’arrêter l’enregistrement"
+                                return@launch
+                            }
+                        isRecording = false
+                        if (audioPath.isBlank()) {
+                            voiceErrorMessage = "Aucun enregistrement audio disponible"
+                            return@launch
+                        }
+                        transcribePath(audioPath, cleanupImportedWav = false)
+                    }
+                },
                 onPickAndTranscribe = {
                     scope.launch {
                         voiceErrorMessage = null
@@ -382,19 +444,7 @@ fun IaPersoRoot(
                             return@launch
                         }
                         val audioPath = LocalAudioPicker.pickWhisperWav() ?: return@launch
-                        isTranscribing = true
-                        val result = withContext(Dispatchers.Default) {
-                            engine.transcribeAudio(audioPath)
-                        }
-                        result.onSuccess { transcription ->
-                            transcript = transcription.text
-                        }.onFailure { failure ->
-                            voiceErrorMessage = failure.message ?: "La transcription a échoué"
-                        }
-                        withContext(Dispatchers.Default) {
-                            LocalAudioPicker.cleanup(audioPath)
-                        }
-                        isTranscribing = false
+                        transcribePath(audioPath, cleanupImportedWav = true)
                     }
                 },
             )
