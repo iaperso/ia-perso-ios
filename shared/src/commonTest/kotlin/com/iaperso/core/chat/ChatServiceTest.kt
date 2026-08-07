@@ -67,6 +67,30 @@ class ChatServiceTest {
 
         assertEquals("ABC", streamed.toString())
     }
+
+    @Test
+    fun firstMessageAutomaticallyNamesDefaultConversation() = runTest {
+        val repository = InMemoryConversationRepository()
+        val engine = FakeLocalAIEngine(response = "OK")
+        var nextId = 0
+        val service = ChatService(
+            engine = engine,
+            conversations = repository,
+            idProvider = { "id-${nextId++}" },
+            nowMillis = { 1_000L },
+        )
+        val conversation = service.createConversation()
+
+        service.sendMessage(
+            conversationId = conversation.id,
+            text = "Explique-moi simplement comment fonctionne un modèle local",
+        )
+
+        val saved = repository.get(conversation.id)
+        assertNotNull(saved)
+        assertTrue(saved.title.startsWith("Explique-moi simplement"))
+        assertTrue(saved.title.length <= 48)
+    }
 }
 
 private class FakeLocalAIEngine(
