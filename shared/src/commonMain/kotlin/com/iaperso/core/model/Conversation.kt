@@ -1,17 +1,22 @@
 package com.iaperso.core.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 enum class MessageRole {
     SYSTEM,
     USER,
     ASSISTANT,
 }
 
+@Serializable
 enum class MessageModality {
     TEXT,
     IMAGE,
     AUDIO,
 }
 
+@Serializable
 data class ChatMessage(
     val id: String,
     val role: MessageRole,
@@ -21,6 +26,7 @@ data class ChatMessage(
     val localAssetPath: String? = null,
 )
 
+@Serializable
 data class Conversation(
     val id: String,
     val title: String,
