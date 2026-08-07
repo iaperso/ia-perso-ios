@@ -3,13 +3,22 @@ name: iOS Image App
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'web/**'
+      - '.github/workflows/web-image-provider.yml'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'web/**'
+      - '.github/workflows/web-image-provider.yml'
   workflow_dispatch:
 
 concurrency:
   group: ios-image-app-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   validate-ios:
