@@ -1,8 +1,15 @@
 const HORDE_ROOT = 'https://aihorde.net/api/v2';
-const HORDE_CLIENT_AGENT = 'IA-Perso:1.1:github.com/iaperso/ia-perso-ios';
+const HORDE_CLIENT_AGENT = 'IA-Perso:1.2:github.com/iaperso/ia-perso-ios';
 const ANONYMOUS_API_KEY = '0000000000';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export function buildFastImageUrl(promptText, { width = 768, height = 768, seed } = {}) {
+  const prompt = String(promptText || '').trim();
+  if (!prompt) throw new Error('Décris d’abord une image.');
+  const chosenSeed = Number.isFinite(Number(seed)) ? Number(seed) : Math.floor(Math.random() * 2147483647);
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${Number(width)}&height=${Number(height)}&model=flux&safe=true&seed=${chosenSeed}`;
+}
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 20000, fetchImpl = globalThis.fetch) {
   if (typeof fetchImpl !== 'function') throw new Error('fetch indisponible.');
@@ -40,21 +47,13 @@ export async function pickHordeModel({ fetchImpl = globalThis.fetch } = {}) {
     const active = models.filter((m) => m && typeof m.name === 'string' && Number(m.count || 0) > 0);
     if (!active.length) return null;
 
-    const preferredNames = [
-      'AlbedoBase XL (SDXL)',
-      'Deliberate',
-      'Dreamshaper',
-      'stable_diffusion',
-    ];
-    for (const wanted of preferredNames) {
-      const match = active.find((m) => m.name.toLowerCase() === wanted.toLowerCase());
-      if (match) return match.name;
-    }
-
     active.sort((a, b) => {
-      const countDelta = Number(b.count || 0) - Number(a.count || 0);
-      if (countDelta) return countDelta;
-      return Number(a.eta || 0) - Number(b.eta || 0);
+      const etaA = Number.isFinite(Number(a.eta)) ? Number(a.eta) : Number.MAX_SAFE_INTEGER;
+      const etaB = Number.isFinite(Number(b.eta)) ? Number(b.eta) : Number.MAX_SAFE_INTEGER;
+      if (etaA !== etaB) return etaA - etaB;
+      const jobsDelta = Number(a.jobs || 0) - Number(b.jobs || 0);
+      if (jobsDelta) return jobsDelta;
+      return Number(b.count || 0) - Number(a.count || 0);
     });
     return active[0].name;
   } catch (error) {
