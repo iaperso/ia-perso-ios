@@ -1,7 +1,7 @@
 {
   "name": "IA Perso",
   "short_name": "IA Perso",
-  "description": "Assistant personnel : texte local WebGPU et images via ComfyUI ou GPU distant.",
+  "description": "Un prompt, une image.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#080a0e",
