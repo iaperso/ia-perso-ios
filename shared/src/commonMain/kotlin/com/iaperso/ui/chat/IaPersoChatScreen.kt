@@ -45,8 +45,6 @@ fun IaPersoChatScreen(
                 title = { Text("IA Perso") },
                 actions = {
                     Button(onClick = onOpenConversations) { Text("Chats") }
-                    Button(onClick = onOpenImages) { Text("Images") }
-                    Button(onClick = onOpenVoice) { Text("Voix") }
                     Button(onClick = onOpenModels) { Text("Modèles") }
                 },
             )
@@ -59,11 +57,37 @@ fun IaPersoChatScreen(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = onOpenImages,
+                ) {
+                    Text("Images")
+                }
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = onOpenVoice,
+                ) {
+                    Text("Voix")
+                }
+            }
+
             if (state.activeModelName == null) {
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Aucun modèle texte chargé", style = MaterialTheme.typography.titleMedium)
-                        Text("Ouvre Modèles pour choisir un fichier GGUF local.")
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text("Première étape", style = MaterialTheme.typography.titleMedium)
+                        Text("1. Ouvre Modèles.")
+                        Text("2. Importe un petit fichier .gguf.")
+                        Text("3. Appuie sur Charger, puis reviens ici pour discuter hors ligne.")
+                        Button(onClick = onOpenModels) {
+                            Text("Ouvrir Modèles")
+                        }
                     }
                 }
             } else {
