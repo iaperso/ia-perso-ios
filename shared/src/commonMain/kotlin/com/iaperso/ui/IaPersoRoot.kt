@@ -18,29 +18,24 @@ import com.iaperso.core.repository.SettingsConversationRepository
 import com.iaperso.core.repository.SettingsModelRepository
 import com.iaperso.ui.chat.IaPersoChatScreen
 import com.iaperso.ui.chat.IaPersoChatUiState
+import com.iaperso.ui.conversations.IaPersoConversationsScreen
 import com.iaperso.ui.models.IaPersoModelsScreen
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlin.random.Random
 
-/**
- * Self-contained IA Perso product root.
- *
- * Platform code only needs to provide a file importer. Everything else here is local:
- * conversations, selected models and inference state.
- */
 @Composable
 fun IaPersoRoot(
     importLocalModel: suspend (ModelCapability) -> LocalModel?,
 ) {
     val scope = rememberCoroutineScope()
-    val conversations = remember { SettingsConversationRepository() }
+    val conversationsRepository = remember { SettingsConversationRepository() }
     val modelsRepository = remember { SettingsModelRepository() }
     val engine = remember { LlamatikLocalAIEngine() }
     val chatService = remember {
         ChatService(
             engine = engine,
-            conversations = conversations,
+            conversations = conversationsRepository,
             idProvider = {
                 "${Clock.System.now().toEpochMilliseconds()}-${Random.nextLong().toString(16)}"
             },
@@ -49,6 +44,7 @@ fun IaPersoRoot(
     }
 
     var route by remember { mutableStateOf(IaPersoRoute.CHAT) }
+    var conversationList by remember { mutableStateOf<List<Conversation>>(emptyList()) }
     var currentConversation by remember { mutableStateOf<Conversation?>(null) }
     var models by remember { mutableStateOf<List<LocalModel>>(emptyList()) }
     var activeTextModel by remember { mutableStateOf<LocalModel?>(null) }
@@ -56,19 +52,33 @@ fun IaPersoRoot(
     var streamingText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    suspend fun refreshConversations() {
+        conversationList = conversationsRepository.list()
+        currentConversation?.let { current ->
+            currentConversation = conversationsRepository.get(current.id)
+        }
+    }
+
     suspend fun refreshModels() {
         models = modelsRepository.list()
         activeTextModel = modelsRepository.activeModel(ModelCapability.TEXT_GENERATION)
     }
 
+    suspend fun createNewConversation(): Conversation {
+        val created = chatService.createConversation()
+        currentConversation = created
+        refreshConversations()
+        return created
+    }
+
     suspend fun ensureConversation(): Conversation {
         currentConversation?.let { return it }
-        val existing = conversations.list().firstOrNull()
+        val existing = conversationsRepository.list().firstOrNull()
         if (existing != null) {
             currentConversation = existing
             return existing
         }
-        return chatService.createConversation().also { currentConversation = it }
+        return createNewConversation()
     }
 
     suspend fun loadModel(model: LocalModel) {
@@ -100,7 +110,8 @@ fun IaPersoRoot(
     }
 
     LaunchedEffect(Unit) {
-        currentConversation = conversations.list().firstOrNull()
+        conversationList = conversationsRepository.list()
+        currentConversation = conversationList.firstOrNull()
         refreshModels()
 
         activeTextModel?.let { saved ->
@@ -138,9 +149,11 @@ fun IaPersoRoot(
                         result.onSuccess { completed ->
                             currentConversation = completed
                             streamingText = ""
+                            refreshConversations()
                         }.onFailure { failure ->
                             errorMessage = failure.message ?: "La génération a échoué"
-                            currentConversation = conversations.get(conversation.id)
+                            currentConversation = conversationsRepository.get(conversation.id)
+                            refreshConversations()
                         }
                         isGenerating = false
                     }
@@ -149,7 +162,42 @@ fun IaPersoRoot(
                     chatService.cancelGeneration()
                     isGenerating = false
                 },
+                onOpenConversations = {
+                    scope.launch {
+                        refreshConversations()
+                        route = IaPersoRoute.CONVERSATIONS
+                    }
+                },
                 onOpenModels = { route = IaPersoRoute.MODELS },
+            )
+        }
+
+        IaPersoRoute.CONVERSATIONS -> {
+            IaPersoConversationsScreen(
+                conversations = conversationList,
+                currentConversationId = currentConversation?.id,
+                onBack = { route = IaPersoRoute.CHAT },
+                onNewConversation = {
+                    scope.launch {
+                        createNewConversation()
+                        route = IaPersoRoute.CHAT
+                    }
+                },
+                onOpenConversation = { conversation ->
+                    currentConversation = conversation
+                    errorMessage = null
+                    streamingText = ""
+                    route = IaPersoRoute.CHAT
+                },
+                onDeleteConversation = { conversation ->
+                    scope.launch {
+                        conversationsRepository.delete(conversation.id)
+                        if (currentConversation?.id == conversation.id) {
+                            currentConversation = null
+                        }
+                        refreshConversations()
+                    }
+                },
             )
         }
 
@@ -188,5 +236,6 @@ fun IaPersoRoot(
 
 private enum class IaPersoRoute {
     CHAT,
+    CONVERSATIONS,
     MODELS,
 }
