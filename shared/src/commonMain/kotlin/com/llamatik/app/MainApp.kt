@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -72,9 +73,7 @@ fun MainApp() {
                                     if (!modelReady) {
                                         val modelPath = StableDiffusionBridge.getModelPath(DEFAULT_MODEL)
                                         modelReady = StableDiffusionBridge.initModel(modelPath, threads = 4)
-                                        check(modelReady) {
-                                            "Modèle introuvable : $DEFAULT_MODEL"
-                                        }
+                                        check(modelReady) { "Modèle introuvable : $DEFAULT_MODEL" }
                                     }
 
                                     val rgba = StableDiffusionBridge.txt2img(
@@ -122,11 +121,6 @@ fun MainApp() {
     }
 }
 
-/**
- * stable-diffusion.cpp renvoie du RGBA brut. Compose sait décoder BMP sur les
- * cibles mobiles/desktop ; on encapsule donc les pixels dans un BMP 32 bits,
- * sans dépendance de codec ni serveur intermédiaire.
- */
 private fun rgbaToBmp(rgba: ByteArray, width: Int, height: Int): ByteArray {
     require(rgba.size == width * height * 4)
     val pixelBytes = width * height * 4
