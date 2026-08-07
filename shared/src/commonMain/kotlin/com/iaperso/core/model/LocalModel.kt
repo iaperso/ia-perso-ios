@@ -1,11 +1,15 @@
 package com.iaperso.core.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 enum class ModelCapability {
     TEXT_GENERATION,
     IMAGE_GENERATION,
     SPEECH_TO_TEXT,
 }
 
+@Serializable
 enum class ModelState {
     NOT_INSTALLED,
     DOWNLOADING,
@@ -15,6 +19,7 @@ enum class ModelState {
     ERROR,
 }
 
+@Serializable
 data class LocalModel(
     val id: String,
     val displayName: String,
@@ -26,6 +31,7 @@ data class LocalModel(
     val errorMessage: String? = null,
 )
 
+@Serializable
 data class GenerationSettings(
     val temperature: Float = 0.7f,
     val topP: Float = 0.95f,
