@@ -7,7 +7,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
 import com.iaperso.core.chat.ChatService
+import com.iaperso.core.engine.ImageGenerationSettings
 import com.iaperso.core.engine.LlamatikLocalAIEngine
 import com.iaperso.core.model.Conversation
 import com.iaperso.core.model.GenerationSettings
@@ -19,8 +21,13 @@ import com.iaperso.core.repository.SettingsModelRepository
 import com.iaperso.ui.chat.IaPersoChatScreen
 import com.iaperso.ui.chat.IaPersoChatUiState
 import com.iaperso.ui.conversations.IaPersoConversationsScreen
+import com.iaperso.ui.image.IaPersoImageScreen
+import com.iaperso.ui.image.IaPersoImageUiState
+import com.iaperso.ui.image.rgbaToPreviewImageBitmap
 import com.iaperso.ui.models.IaPersoModelsScreen
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlin.random.Random
 
@@ -48,9 +55,15 @@ fun IaPersoRoot(
     var currentConversation by remember { mutableStateOf<Conversation?>(null) }
     var models by remember { mutableStateOf<List<LocalModel>>(emptyList()) }
     var activeTextModel by remember { mutableStateOf<LocalModel?>(null) }
+    var activeImageModel by remember { mutableStateOf<LocalModel?>(null) }
     var isGenerating by remember { mutableStateOf(false) }
     var streamingText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var isGeneratingImage by remember { mutableStateOf(false) }
+    var imagePreview by remember { mutableStateOf<ImageBitmap?>(null) }
+    var generatedImageWidth by remember { mutableStateOf(0) }
+    var generatedImageHeight by remember { mutableStateOf(0) }
+    var imageErrorMessage by remember { mutableStateOf<String?>(null) }
 
     suspend fun refreshConversations() {
         conversationList = conversationsRepository.list()
@@ -62,6 +75,7 @@ fun IaPersoRoot(
     suspend fun refreshModels() {
         models = modelsRepository.list()
         activeTextModel = modelsRepository.activeModel(ModelCapability.TEXT_GENERATION)
+        activeImageModel = modelsRepository.activeModel(ModelCapability.IMAGE_GENERATION)
     }
 
     suspend fun createNewConversation(): Conversation {
@@ -83,14 +97,17 @@ fun IaPersoRoot(
 
     suspend fun loadModel(model: LocalModel) {
         errorMessage = null
+        imageErrorMessage = null
         val loading = model.copy(state = ModelState.LOADING, errorMessage = null)
         modelsRepository.upsert(loading)
         refreshModels()
 
-        val result = when (model.capability) {
-            ModelCapability.TEXT_GENERATION -> engine.loadTextModel(model)
-            ModelCapability.IMAGE_GENERATION -> engine.loadImageModel(model)
-            ModelCapability.SPEECH_TO_TEXT -> engine.loadSpeechModel(model)
+        val result = withContext(Dispatchers.Default) {
+            when (model.capability) {
+                ModelCapability.TEXT_GENERATION -> engine.loadTextModel(model)
+                ModelCapability.IMAGE_GENERATION -> engine.loadImageModel(model)
+                ModelCapability.SPEECH_TO_TEXT -> engine.loadSpeechModel(model)
+            }
         }
 
         result.onSuccess {
@@ -105,8 +122,17 @@ fun IaPersoRoot(
                 ),
             )
             errorMessage = failure.message
+            imageErrorMessage = failure.message
         }
         refreshModels()
+    }
+
+    suspend fun ensureImageModelLoaded(): Boolean {
+        if (engine.loadedImageModel != null) return true
+        val saved = activeImageModel ?: modelsRepository.activeModel(ModelCapability.IMAGE_GENERATION)
+        if (saved?.localPath == null) return false
+        loadModel(saved)
+        return engine.loadedImageModel != null
     }
 
     LaunchedEffect(Unit) {
@@ -116,7 +142,7 @@ fun IaPersoRoot(
 
         activeTextModel?.let { saved ->
             if (saved.localPath != null) {
-                val result = engine.loadTextModel(saved)
+                val result = withContext(Dispatchers.Default) { engine.loadTextModel(saved) }
                 if (result.isFailure) {
                     errorMessage = result.exceptionOrNull()?.message
                 }
@@ -168,6 +194,13 @@ fun IaPersoRoot(
                         route = IaPersoRoute.CONVERSATIONS
                     }
                 },
+                onOpenImages = {
+                    scope.launch {
+                        imageErrorMessage = null
+                        ensureImageModelLoaded()
+                        route = IaPersoRoute.IMAGES
+                    }
+                },
                 onOpenModels = { route = IaPersoRoute.MODELS },
             )
         }
@@ -201,6 +234,52 @@ fun IaPersoRoot(
             )
         }
 
+        IaPersoRoute.IMAGES -> {
+            IaPersoImageScreen(
+                state = IaPersoImageUiState(
+                    activeModelName = engine.loadedImageModel?.displayName,
+                    isGenerating = isGeneratingImage,
+                    preview = imagePreview,
+                    width = generatedImageWidth,
+                    height = generatedImageHeight,
+                    errorMessage = imageErrorMessage,
+                ),
+                onBack = { route = IaPersoRoute.CHAT },
+                onOpenModels = { route = IaPersoRoute.MODELS },
+                onGenerate = { prompt, negativePrompt ->
+                    scope.launch {
+                        imageErrorMessage = null
+                        if (!ensureImageModelLoaded()) {
+                            imageErrorMessage = "Charge d’abord un modèle image dans Modèles."
+                            return@launch
+                        }
+                        isGeneratingImage = true
+                        val result = withContext(Dispatchers.Default) {
+                            engine.generateImage(
+                                prompt = prompt,
+                                negativePrompt = negativePrompt,
+                                settings = ImageGenerationSettings(),
+                            )
+                        }
+                        result.onSuccess { generated ->
+                            generatedImageWidth = generated.width
+                            generatedImageHeight = generated.height
+                            imagePreview = withContext(Dispatchers.Default) {
+                                rgbaToPreviewImageBitmap(
+                                    rgba = generated.rgbaBytes,
+                                    width = generated.width,
+                                    height = generated.height,
+                                )
+                            }
+                        }.onFailure { failure ->
+                            imageErrorMessage = failure.message ?: "La génération d’image a échoué"
+                        }
+                        isGeneratingImage = false
+                    }
+                },
+            )
+        }
+
         IaPersoRoute.MODELS -> {
             IaPersoModelsScreen(
                 models = models,
@@ -208,6 +287,7 @@ fun IaPersoRoot(
                 onImport = { capability ->
                     scope.launch {
                         errorMessage = null
+                        imageErrorMessage = null
                         val imported = importLocalModel(capability)
                         if (imported != null) {
                             modelsRepository.upsert(
@@ -220,10 +300,12 @@ fun IaPersoRoot(
                 onLoad = { model -> scope.launch { loadModel(model) } },
                 onRemove = { model ->
                     scope.launch {
-                        when (model.capability) {
-                            ModelCapability.TEXT_GENERATION -> engine.unloadTextModel()
-                            ModelCapability.IMAGE_GENERATION -> engine.unloadImageModel()
-                            ModelCapability.SPEECH_TO_TEXT -> engine.unloadSpeechModel()
+                        withContext(Dispatchers.Default) {
+                            when (model.capability) {
+                                ModelCapability.TEXT_GENERATION -> engine.unloadTextModel()
+                                ModelCapability.IMAGE_GENERATION -> engine.unloadImageModel()
+                                ModelCapability.SPEECH_TO_TEXT -> engine.unloadSpeechModel()
+                            }
                         }
                         modelsRepository.remove(model.id)
                         refreshModels()
@@ -237,5 +319,6 @@ fun IaPersoRoot(
 private enum class IaPersoRoute {
     CHAT,
     CONVERSATIONS,
+    IMAGES,
     MODELS,
 }
