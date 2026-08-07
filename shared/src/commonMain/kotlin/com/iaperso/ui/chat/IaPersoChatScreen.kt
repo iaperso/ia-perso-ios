@@ -33,6 +33,7 @@ fun IaPersoChatScreen(
     onSend: (String) -> Unit,
     onCancel: () -> Unit,
     onOpenConversations: () -> Unit,
+    onOpenImages: () -> Unit,
     onOpenModels: () -> Unit,
 ) {
     var draft by remember { mutableStateOf("") }
@@ -42,12 +43,9 @@ fun IaPersoChatScreen(
             TopAppBar(
                 title = { Text("IA Perso") },
                 actions = {
-                    Button(onClick = onOpenConversations) {
-                        Text("Chats")
-                    }
-                    Button(onClick = onOpenModels) {
-                        Text("Modèles")
-                    }
+                    Button(onClick = onOpenConversations) { Text("Chats") }
+                    Button(onClick = onOpenImages) { Text("Images") }
+                    Button(onClick = onOpenModels) { Text("Modèles") }
                 },
             )
         },
