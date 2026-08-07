@@ -34,6 +34,7 @@ fun IaPersoChatScreen(
     onCancel: () -> Unit,
     onOpenConversations: () -> Unit,
     onOpenImages: () -> Unit,
+    onOpenVoice: () -> Unit,
     onOpenModels: () -> Unit,
 ) {
     var draft by remember { mutableStateOf("") }
@@ -45,6 +46,7 @@ fun IaPersoChatScreen(
                 actions = {
                     Button(onClick = onOpenConversations) { Text("Chats") }
                     Button(onClick = onOpenImages) { Text("Images") }
+                    Button(onClick = onOpenVoice) { Text("Voix") }
                     Button(onClick = onOpenModels) { Text("Modèles") }
                 },
             )
