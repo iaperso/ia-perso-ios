@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d12" />
+  <meta name="description" content="IA Perso — chat IA local directement dans le navigateur." />
+  <title>IA Perso</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">IA LOCALE · NAVIGATEUR</p>
+        <h1>IA Perso</h1>
+      </div>
+      <button id="newChatButton" class="ghost-button" type="button">Nouveau</button>
+    </header>
+
+    <section class="status-card" aria-live="polite">
+      <div class="status-row">
+        <span id="statusDot" class="status-dot"></span>
+        <div>
+          <strong id="statusTitle">Vérification de l’iPhone…</strong>
+          <p id="statusText">La première utilisation télécharge un petit modèle IA puis le conserve dans le cache du navigateur.</p>
+        </div>
+      </div>
+      <div class="progress-track" aria-hidden="true"><div id="progressBar" class="progress-bar"></div></div>
+      <div class="controls-row">
+        <label for="modelSelect">Modèle</label>
+        <select id="modelSelect">
+          <option value="SmolLM2-360M-Instruct-q4f16_1-MLC">SmolLM2 360M · léger</option>
+          <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B · meilleur</option>
+        </select>
+        <button id="loadButton" class="primary-button" type="button">Charger l’IA</button>
+      </div>
+    </section>
+
+    <section id="messages" class="messages" aria-label="Conversation">
+      <article class="message assistant-message">
+        <div class="avatar">IA</div>
+        <div class="bubble">
+          <p>Bonjour. Je suis IA Perso. Charge le modèle une première fois, puis écris-moi. Le calcul se fait directement dans ton navigateur.</p>
+        </div>
+      </article>
+    </section>
+
+    <form id="chatForm" class="composer">
+      <textarea id="promptInput" rows="1" placeholder="Écris ton message…" autocomplete="off"></textarea>
+      <button id="sendButton" class="send-button" type="submit" disabled aria-label="Envoyer">↑</button>
+    </form>
+
+    <footer>
+      <span id="privacyText">Aucune clé API requise.</span>
+      <button id="clearButton" class="text-button" type="button">Effacer l’historique</button>
+    </footer>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
