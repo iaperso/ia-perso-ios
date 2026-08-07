@@ -15,7 +15,7 @@ class ChatService(
     private val nowMillis: () -> Long,
 ) {
     suspend fun createConversation(
-        title: String = "Nouvelle conversation",
+        title: String = DEFAULT_TITLE,
         modelId: String? = null,
         systemPrompt: String? = null,
     ): Conversation {
@@ -54,6 +54,7 @@ class ChatService(
             createdAtEpochMillis = now,
         )
         val withUser = conversation.copy(
+            title = conversation.title.autoTitleIfNeeded(cleanText, conversation.messages.isEmpty()),
             messages = conversation.messages + userMessage,
             updatedAtEpochMillis = now,
         )
@@ -103,5 +104,16 @@ class ChatService(
 
     fun cancelGeneration() {
         engine.cancelTextGeneration()
+    }
+
+    private fun String.autoTitleIfNeeded(firstMessage: String, isFirstMessage: Boolean): String {
+        if (!isFirstMessage || this != DEFAULT_TITLE) return this
+        val oneLine = firstMessage.replace('\n', ' ').trim()
+        return if (oneLine.length <= TITLE_MAX_LENGTH) oneLine else oneLine.take(TITLE_MAX_LENGTH - 1) + "…"
+    }
+
+    private companion object {
+        const val DEFAULT_TITLE = "Nouvelle conversation"
+        const val TITLE_MAX_LENGTH = 48
     }
 }
