@@ -1,7 +1,11 @@
 {
   "name": "ia-perso",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
-  "engines": { "node": ">=20" }
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "check": "node --check providers.js && node --check api/generate.js",
+    "test": "node --test providers.test.js api/generate.test.js"
+  }
 }
