@@ -7,6 +7,10 @@ on:
       - '.github/workflows/web-image-provider.yml'
   workflow_dispatch:
 
+concurrency:
+  group: web-image-provider-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   probe-fast-provider:
     runs-on: ubuntu-latest
@@ -18,12 +22,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Probe fast anonymous provider
+      - name: Validate web JavaScript syntax
+        run: |
+          node --check web/providers.js
+          node --check web/fast-provider-smoke-test.js
+      - name: Generate a real anonymous test image
         run: node web/fast-provider-smoke-test.js
 
-  generate-image-smoke-test:
+  probe-fallback-provider:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 2
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,10 +39,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Validate web JavaScript syntax
-        run: |
-          node --check web/providers.js
-          node --check web/provider-smoke-test.js
-          node --check web/fast-provider-smoke-test.js
-      - name: Generate a real anonymous test image
+      - name: Validate fallback JavaScript syntax
+        run: node --check web/provider-smoke-test.js
+      - name: Verify fallback browser connectivity
         run: node web/provider-smoke-test.js
