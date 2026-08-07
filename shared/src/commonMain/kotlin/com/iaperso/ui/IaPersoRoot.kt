@@ -104,6 +104,25 @@ fun IaPersoRoot(
         return createNewConversation()
     }
 
+    suspend fun releaseOtherEnginesFor(capability: ModelCapability) {
+        withContext(Dispatchers.Default) {
+            when (capability) {
+                ModelCapability.TEXT_GENERATION -> {
+                    if (engine.loadedImageModel != null) engine.unloadImageModel()
+                    if (engine.loadedSpeechModel != null) engine.unloadSpeechModel()
+                }
+                ModelCapability.IMAGE_GENERATION -> {
+                    if (engine.loadedTextModel != null) engine.unloadTextModel()
+                    if (engine.loadedSpeechModel != null) engine.unloadSpeechModel()
+                }
+                ModelCapability.SPEECH_TO_TEXT -> {
+                    if (engine.loadedTextModel != null) engine.unloadTextModel()
+                    if (engine.loadedImageModel != null) engine.unloadImageModel()
+                }
+            }
+        }
+    }
+
     suspend fun loadModel(model: LocalModel) {
         errorMessage = null
         imageErrorMessage = null
@@ -123,6 +142,7 @@ fun IaPersoRoot(
         modelsRepository.upsert(loading)
         refreshModels()
 
+        releaseOtherEnginesFor(model.capability)
         val result = withContext(Dispatchers.Default) {
             when (model.capability) {
                 ModelCapability.TEXT_GENERATION -> engine.loadTextModel(model)
@@ -149,6 +169,14 @@ fun IaPersoRoot(
         refreshModels()
     }
 
+    suspend fun ensureTextModelLoaded(): Boolean {
+        if (engine.loadedTextModel != null) return true
+        val saved = activeTextModel ?: modelsRepository.activeModel(ModelCapability.TEXT_GENERATION)
+        if (saved?.localPath == null) return false
+        loadModel(saved)
+        return engine.loadedTextModel != null
+    }
+
     suspend fun ensureImageModelLoaded(): Boolean {
         if (engine.loadedImageModel != null) return true
         val saved = activeImageModel ?: modelsRepository.activeModel(ModelCapability.IMAGE_GENERATION)
@@ -163,6 +191,13 @@ fun IaPersoRoot(
         if (saved?.localPath == null) return false
         loadModel(saved)
         return engine.loadedSpeechModel != null
+    }
+
+    suspend fun returnToChat() {
+        if (activeTextModel != null) {
+            ensureTextModelLoaded()
+        }
+        route = IaPersoRoute.CHAT
     }
 
     LaunchedEffect(Unit) {
@@ -201,6 +236,10 @@ fun IaPersoRoot(
                 onSend = { text ->
                     scope.launch {
                         errorMessage = null
+                        if (!ensureTextModelLoaded()) {
+                            errorMessage = "Charge d’abord un modèle texte dans Modèles."
+                            return@launch
+                        }
                         isGenerating = true
                         streamingText = ""
                         val conversation = ensureConversation()
@@ -289,7 +328,7 @@ fun IaPersoRoot(
                     height = generatedImageHeight,
                     errorMessage = imageErrorMessage,
                 ),
-                onBack = { route = IaPersoRoute.CHAT },
+                onBack = { scope.launch { returnToChat() } },
                 onOpenModels = { route = IaPersoRoute.MODELS },
                 onGenerate = { prompt, negativePrompt ->
                     scope.launch {
@@ -333,7 +372,7 @@ fun IaPersoRoot(
                     transcript = transcript,
                     errorMessage = voiceErrorMessage,
                 ),
-                onBack = { route = IaPersoRoute.CHAT },
+                onBack = { scope.launch { returnToChat() } },
                 onOpenModels = { route = IaPersoRoute.MODELS },
                 onPickAndTranscribe = {
                     scope.launch {
@@ -364,7 +403,7 @@ fun IaPersoRoot(
         IaPersoRoute.MODELS -> {
             IaPersoModelsScreen(
                 models = models,
-                onBack = { route = IaPersoRoute.CHAT },
+                onBack = { scope.launch { returnToChat() } },
                 onImport = { capability ->
                     scope.launch {
                         errorMessage = null
