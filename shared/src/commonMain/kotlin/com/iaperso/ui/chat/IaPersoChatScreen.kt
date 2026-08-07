@@ -27,17 +27,12 @@ import androidx.compose.ui.unit.dp
 import com.iaperso.core.model.ChatMessage
 import com.iaperso.core.model.MessageRole
 
-/**
- * First IA Perso chat surface.
- *
- * It is deliberately independent from the existing Llamatik navigation so it can be
- * integrated progressively after CI confirms the commonMain foundation compiles.
- */
 @Composable
 fun IaPersoChatScreen(
     state: IaPersoChatUiState,
     onSend: (String) -> Unit,
     onCancel: () -> Unit,
+    onOpenConversations: () -> Unit,
     onOpenModels: () -> Unit,
 ) {
     var draft by remember { mutableStateOf("") }
@@ -47,6 +42,9 @@ fun IaPersoChatScreen(
             TopAppBar(
                 title = { Text("IA Perso") },
                 actions = {
+                    Button(onClick = onOpenConversations) {
+                        Text("Chats")
+                    }
                     Button(onClick = onOpenModels) {
                         Text("Modèles")
                     }
