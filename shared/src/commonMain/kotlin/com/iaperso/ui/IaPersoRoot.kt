@@ -352,6 +352,9 @@ fun IaPersoRoot(
                         }.onFailure { failure ->
                             voiceErrorMessage = failure.message ?: "La transcription a échoué"
                         }
+                        withContext(Dispatchers.Default) {
+                            LocalAudioPicker.cleanup(audioPath)
+                        }
                         isTranscribing = false
                     }
                 },
