@@ -32,7 +32,9 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.decodeToImageBitmap
 
 private const val IMAGE_SIZE = 512
-private const val DEFAULT_MODEL = "dreamshaper.safetensors"
+// Quantized SD 1.5 model: considerably smaller than a normal fp16 checkpoint.
+// Put this file in Documents/models on iOS (or bundle it with the app).
+private const val DEFAULT_MODEL = "stable-diffusion-v1-5-pruned-emaonly-Q4_0.gguf"
 
 /** IA Perso : un prompt -> une image. Aucun chat, aucun menu. */
 @Composable
@@ -51,13 +53,16 @@ fun MainApp() {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                Text("IA Perso", style = MaterialTheme.typography.headlineMedium)
+                Text("Décris une image. Tout se fait localement sur ton appareil.")
+
                 OutlinedTextField(
                     value = prompt,
                     onValueChange = { prompt = it },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Décris l’image…") },
-                    minLines = 3,
-                    maxLines = 6,
+                    placeholder = { Text("Ex. Une maison dans la montagne au coucher du soleil") },
+                    minLines = 4,
+                    maxLines = 8,
                     enabled = !isGenerating,
                 )
 
@@ -73,11 +78,14 @@ fun MainApp() {
                                     if (!modelReady) {
                                         val modelPath = StableDiffusionBridge.getModelPath(DEFAULT_MODEL)
                                         modelReady = StableDiffusionBridge.initModel(modelPath, threads = 4)
-                                        check(modelReady) { "Modèle introuvable : $DEFAULT_MODEL" }
+                                        check(modelReady) {
+                                            "Le modèle d’image n’est pas encore installé. Fichier attendu : $DEFAULT_MODEL"
+                                        }
                                     }
 
                                     val rgba = StableDiffusionBridge.txt2img(
                                         prompt = prompt.trim(),
+                                        negativePrompt = "blurry, low quality, distorted, deformed",
                                         width = IMAGE_SIZE,
                                         height = IMAGE_SIZE,
                                         steps = 20,
@@ -98,7 +106,7 @@ fun MainApp() {
                         }
                     },
                 ) {
-                    Text(if (isGenerating) "Génération…" else "Générer")
+                    Text(if (isGenerating) "Création de l’image…" else "Générer l’image")
                 }
 
                 Box(
@@ -106,7 +114,10 @@ fun MainApp() {
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
-                        isGenerating -> CircularProgressIndicator()
+                        isGenerating -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator()
+                            Text("Génération locale en cours…", modifier = Modifier.padding(top = 12.dp))
+                        }
                         image != null -> Image(
                             bitmap = image!!,
                             contentDescription = prompt,
@@ -114,6 +125,7 @@ fun MainApp() {
                             contentScale = ContentScale.Fit,
                         )
                         error != null -> Text(error!!, color = MaterialTheme.colorScheme.error)
+                        else -> Text("Ton image apparaîtra ici.")
                     }
                 }
             }
