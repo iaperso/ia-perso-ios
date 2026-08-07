@@ -46,23 +46,41 @@ fun IaPersoModelsScreen(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                "Les modèles restent sur ton appareil. Aucun abonnement IA n'est requis.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text("100 % local", style = MaterialTheme.typography.titleMedium)
+                    Text("Les modèles et tes données restent sur l’appareil. Aucun abonnement IA n’est requis.")
+                    Text(
+                        "Pour commencer, importe un petit modèle texte au format GGUF. Les modèles image et Whisper sont optionnels.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
 
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Button(onClick = { onImport(ModelCapability.TEXT_GENERATION) }) {
-                    Text("Importer GGUF")
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onImport(ModelCapability.TEXT_GENERATION) },
+                ) {
+                    Text("Importer un modèle texte (.gguf)")
                 }
-                Button(onClick = { onImport(ModelCapability.IMAGE_GENERATION) }) {
-                    Text("Importer image")
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onImport(ModelCapability.IMAGE_GENERATION) },
+                ) {
+                    Text("Importer un modèle image")
                 }
-                Button(onClick = { onImport(ModelCapability.SPEECH_TO_TEXT) }) {
-                    Text("Importer Whisper")
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onImport(ModelCapability.SPEECH_TO_TEXT) },
+                ) {
+                    Text("Importer un modèle Whisper (.bin)")
                 }
             }
 
@@ -102,6 +120,7 @@ private fun ModelCard(
         ) {
             Text(model.displayName, style = MaterialTheme.typography.titleMedium)
             Text(capabilityLabel(model.capability))
+            model.sizeBytes?.let { Text("Taille : ${formatBytes(it)}", style = MaterialTheme.typography.bodySmall) }
             Text(model.fileName, style = MaterialTheme.typography.bodySmall)
             Text("État : ${stateLabel(model.state)}")
             model.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -131,4 +150,15 @@ private fun stateLabel(state: ModelState): String = when (state) {
     ModelState.LOADING -> "chargement"
     ModelState.READY -> "prêt"
     ModelState.ERROR -> "erreur"
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1_024) return "$bytes o"
+    val kib = bytes / 1_024.0
+    if (kib < 1_024) return "${kib.toInt()} Ko"
+    val mib = kib / 1_024.0
+    if (mib < 1_024) return "${mib.toInt()} Mo"
+    val gib = mib / 1_024.0
+    val tenths = (gib * 10).toInt() / 10.0
+    return "$tenths Go"
 }
