@@ -1,0 +1,26 @@
+name: Web Image Provider
+
+on:
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-image-provider.yml'
+  workflow_dispatch:
+
+jobs:
+  generate-image-smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate web JavaScript syntax
+        run: |
+          node --check web/providers.js
+          node --check web/provider-smoke-test.js
+      - name: Generate a real anonymous test image
+        run: node web/provider-smoke-test.js
