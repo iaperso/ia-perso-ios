@@ -10,11 +10,14 @@ import com.iaperso.ui.IaPersoRoot
 import com.llamatik.app.localization.AvailableLanguages
 import com.llamatik.app.localization.getCurrentLanguage
 import com.llamatik.app.ui.screens.MainScreen
+import com.llamatik.app.ui.theme.LlamatikTheme
 
 /** Primary application entry point: IA Perso local-first experience. */
 @Composable
 fun MainApp() {
-    IaPersoRoot()
+    LlamatikTheme {
+        IaPersoRoot()
+    }
 }
 
 /**
