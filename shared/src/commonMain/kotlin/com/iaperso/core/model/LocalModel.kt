@@ -34,5 +34,8 @@ data class GenerationSettings(
     val maxTokens: Int = 512,
     val contextLength: Int = 4096,
     val threads: Int = 4,
+    val useMmap: Boolean = true,
+    val flashAttention: Boolean = false,
+    val batchSize: Int = 512,
     val gpuLayers: Int = 0,
 )
