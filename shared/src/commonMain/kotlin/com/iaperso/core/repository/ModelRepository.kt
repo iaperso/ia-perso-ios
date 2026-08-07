@@ -2,6 +2,7 @@ package com.iaperso.core.repository
 
 import com.iaperso.core.model.LocalModel
 import com.iaperso.core.model.ModelCapability
+import com.iaperso.core.model.ModelState
 
 interface ModelRepository {
     suspend fun list(capability: ModelCapability? = null): List<LocalModel>
@@ -36,6 +37,7 @@ class InMemoryModelRepository : ModelRepository {
     override suspend fun setActiveModel(capability: ModelCapability, modelId: String?) {
         if (modelId == null) {
             active.remove(capability)
+            normalizeReadyState(capability, null)
             return
         }
         val model = requireNotNull(models[modelId]) { "Unknown model: $modelId" }
@@ -43,5 +45,20 @@ class InMemoryModelRepository : ModelRepository {
             "Model $modelId does not provide capability $capability"
         }
         active[capability] = modelId
+        normalizeReadyState(capability, modelId)
+    }
+
+    private fun normalizeReadyState(capability: ModelCapability, activeId: String?) {
+        models.entries.forEach { entry ->
+            val model = entry.value
+            if (model.capability != capability) return@forEach
+            entry.setValue(
+                when {
+                    model.id == activeId -> model.copy(state = ModelState.READY, errorMessage = null)
+                    model.state == ModelState.READY -> model.copy(state = ModelState.INSTALLED)
+                    else -> model
+                },
+            )
+        }
     }
 }
