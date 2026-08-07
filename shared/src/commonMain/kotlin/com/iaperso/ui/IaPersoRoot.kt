@@ -8,6 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
+import com.iaperso.core.audio.LocalAudioPicker
 import com.iaperso.core.chat.ChatService
 import com.iaperso.core.engine.ImageGenerationSettings
 import com.iaperso.core.engine.LlamatikLocalAIEngine
@@ -25,6 +26,8 @@ import com.iaperso.ui.image.IaPersoImageScreen
 import com.iaperso.ui.image.IaPersoImageUiState
 import com.iaperso.ui.image.rgbaToPreviewImageBitmap
 import com.iaperso.ui.models.IaPersoModelsScreen
+import com.iaperso.ui.voice.IaPersoVoiceScreen
+import com.iaperso.ui.voice.IaPersoVoiceUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -56,6 +59,7 @@ fun IaPersoRoot(
     var models by remember { mutableStateOf<List<LocalModel>>(emptyList()) }
     var activeTextModel by remember { mutableStateOf<LocalModel?>(null) }
     var activeImageModel by remember { mutableStateOf<LocalModel?>(null) }
+    var activeSpeechModel by remember { mutableStateOf<LocalModel?>(null) }
     var isGenerating by remember { mutableStateOf(false) }
     var streamingText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -64,6 +68,9 @@ fun IaPersoRoot(
     var generatedImageWidth by remember { mutableStateOf(0) }
     var generatedImageHeight by remember { mutableStateOf(0) }
     var imageErrorMessage by remember { mutableStateOf<String?>(null) }
+    var isTranscribing by remember { mutableStateOf(false) }
+    var transcript by remember { mutableStateOf("") }
+    var voiceErrorMessage by remember { mutableStateOf<String?>(null) }
 
     suspend fun refreshConversations() {
         conversationList = conversationsRepository.list()
@@ -76,6 +83,7 @@ fun IaPersoRoot(
         models = modelsRepository.list()
         activeTextModel = modelsRepository.activeModel(ModelCapability.TEXT_GENERATION)
         activeImageModel = modelsRepository.activeModel(ModelCapability.IMAGE_GENERATION)
+        activeSpeechModel = modelsRepository.activeModel(ModelCapability.SPEECH_TO_TEXT)
     }
 
     suspend fun createNewConversation(): Conversation {
@@ -98,6 +106,7 @@ fun IaPersoRoot(
     suspend fun loadModel(model: LocalModel) {
         errorMessage = null
         imageErrorMessage = null
+        voiceErrorMessage = null
         val loading = model.copy(state = ModelState.LOADING, errorMessage = null)
         modelsRepository.upsert(loading)
         refreshModels()
@@ -123,6 +132,7 @@ fun IaPersoRoot(
             )
             errorMessage = failure.message
             imageErrorMessage = failure.message
+            voiceErrorMessage = failure.message
         }
         refreshModels()
     }
@@ -133,6 +143,14 @@ fun IaPersoRoot(
         if (saved?.localPath == null) return false
         loadModel(saved)
         return engine.loadedImageModel != null
+    }
+
+    suspend fun ensureSpeechModelLoaded(): Boolean {
+        if (engine.loadedSpeechModel != null) return true
+        val saved = activeSpeechModel ?: modelsRepository.activeModel(ModelCapability.SPEECH_TO_TEXT)
+        if (saved?.localPath == null) return false
+        loadModel(saved)
+        return engine.loadedSpeechModel != null
     }
 
     LaunchedEffect(Unit) {
@@ -199,6 +217,13 @@ fun IaPersoRoot(
                         imageErrorMessage = null
                         ensureImageModelLoaded()
                         route = IaPersoRoute.IMAGES
+                    }
+                },
+                onOpenVoice = {
+                    scope.launch {
+                        voiceErrorMessage = null
+                        ensureSpeechModelLoaded()
+                        route = IaPersoRoute.VOICE
                     }
                 },
                 onOpenModels = { route = IaPersoRoute.MODELS },
@@ -280,6 +305,39 @@ fun IaPersoRoot(
             )
         }
 
+        IaPersoRoute.VOICE -> {
+            IaPersoVoiceScreen(
+                state = IaPersoVoiceUiState(
+                    activeModelName = engine.loadedSpeechModel?.displayName,
+                    isTranscribing = isTranscribing,
+                    transcript = transcript,
+                    errorMessage = voiceErrorMessage,
+                ),
+                onBack = { route = IaPersoRoute.CHAT },
+                onOpenModels = { route = IaPersoRoute.MODELS },
+                onPickAndTranscribe = {
+                    scope.launch {
+                        voiceErrorMessage = null
+                        if (!ensureSpeechModelLoaded()) {
+                            voiceErrorMessage = "Charge d’abord un modèle Whisper dans Modèles."
+                            return@launch
+                        }
+                        val audioPath = LocalAudioPicker.pickWhisperWav() ?: return@launch
+                        isTranscribing = true
+                        val result = withContext(Dispatchers.Default) {
+                            engine.transcribeAudio(audioPath)
+                        }
+                        result.onSuccess { transcription ->
+                            transcript = transcription.text
+                        }.onFailure { failure ->
+                            voiceErrorMessage = failure.message ?: "La transcription a échoué"
+                        }
+                        isTranscribing = false
+                    }
+                },
+            )
+        }
+
         IaPersoRoute.MODELS -> {
             IaPersoModelsScreen(
                 models = models,
@@ -288,6 +346,7 @@ fun IaPersoRoot(
                     scope.launch {
                         errorMessage = null
                         imageErrorMessage = null
+                        voiceErrorMessage = null
                         val imported = importLocalModel(capability)
                         if (imported != null) {
                             modelsRepository.upsert(
@@ -320,5 +379,6 @@ private enum class IaPersoRoute {
     CHAT,
     CONVERSATIONS,
     IMAGES,
+    VOICE,
     MODELS,
 }
