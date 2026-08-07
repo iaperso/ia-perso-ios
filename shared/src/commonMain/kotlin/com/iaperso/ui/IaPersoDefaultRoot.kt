@@ -5,5 +5,8 @@ import com.iaperso.core.model.LocalModelImporter
 
 @Composable
 fun IaPersoRoot() {
-    IaPersoRoot(importLocalModel = LocalModelImporter::import)
+    IaPersoRoot(
+        importLocalModel = LocalModelImporter::import,
+        removeLocalModelFile = LocalModelImporter::removeImportedFile,
+    )
 }
