@@ -107,6 +107,17 @@ fun IaPersoRoot(
         errorMessage = null
         imageErrorMessage = null
         voiceErrorMessage = null
+
+        val previousActive = modelsRepository.activeModel(model.capability)
+        if (previousActive?.id != model.id) {
+            modelsRepository.setActiveModel(model.capability, null)
+            previousActive?.let { previous ->
+                modelsRepository.upsert(
+                    previous.copy(state = ModelState.INSTALLED, errorMessage = null),
+                )
+            }
+        }
+
         val loading = model.copy(state = ModelState.LOADING, errorMessage = null)
         modelsRepository.upsert(loading)
         refreshModels()
@@ -162,7 +173,15 @@ fun IaPersoRoot(
             if (saved.localPath != null) {
                 val result = withContext(Dispatchers.Default) { engine.loadTextModel(saved) }
                 if (result.isFailure) {
+                    modelsRepository.setActiveModel(ModelCapability.TEXT_GENERATION, null)
+                    modelsRepository.upsert(
+                        saved.copy(
+                            state = ModelState.ERROR,
+                            errorMessage = result.exceptionOrNull()?.message ?: "Impossible de recharger le modèle",
+                        ),
+                    )
                     errorMessage = result.exceptionOrNull()?.message
+                    refreshModels()
                 }
             }
         }
@@ -361,9 +380,15 @@ fun IaPersoRoot(
                     scope.launch {
                         withContext(Dispatchers.Default) {
                             when (model.capability) {
-                                ModelCapability.TEXT_GENERATION -> engine.unloadTextModel()
-                                ModelCapability.IMAGE_GENERATION -> engine.unloadImageModel()
-                                ModelCapability.SPEECH_TO_TEXT -> engine.unloadSpeechModel()
+                                ModelCapability.TEXT_GENERATION -> {
+                                    if (engine.loadedTextModel?.id == model.id) engine.unloadTextModel()
+                                }
+                                ModelCapability.IMAGE_GENERATION -> {
+                                    if (engine.loadedImageModel?.id == model.id) engine.unloadImageModel()
+                                }
+                                ModelCapability.SPEECH_TO_TEXT -> {
+                                    if (engine.loadedSpeechModel?.id == model.id) engine.unloadSpeechModel()
+                                }
                             }
                         }
                         modelsRepository.remove(model.id)
