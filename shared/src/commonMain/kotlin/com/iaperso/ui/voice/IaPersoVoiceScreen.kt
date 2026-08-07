@@ -2,6 +2,7 @@ package com.iaperso.ui.voice
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -23,6 +24,8 @@ fun IaPersoVoiceScreen(
     state: IaPersoVoiceUiState,
     onBack: () -> Unit,
     onOpenModels: () -> Unit,
+    onStartRecording: () -> Unit,
+    onStopAndTranscribe: () -> Unit,
     onPickAndTranscribe: () -> Unit,
 ) {
     Scaffold(
@@ -57,20 +60,46 @@ fun IaPersoVoiceScreen(
                 Text("Modèle : ${state.activeModelName}")
             }
 
-            Text(
-                "Première version : choisis un fichier WAV mono 16 kHz. La transcription reste entièrement sur l’appareil.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Parler à IA Perso", style = MaterialTheme.typography.titleMedium)
+                    Text("L’enregistrement et la transcription restent sur l’iPhone.")
 
-            Button(
-                onClick = onPickAndTranscribe,
-                enabled = state.activeModelName != null && !state.isTranscribing,
+                    if (state.isRecording) {
+                        Text("Enregistrement en cours…")
+                        Button(onClick = onStopAndTranscribe) {
+                            Text("Arrêter et transcrire")
+                        }
+                    } else {
+                        Button(
+                            onClick = onStartRecording,
+                            enabled = state.activeModelName != null && !state.isTranscribing,
+                        ) {
+                            Text("Commencer l’enregistrement")
+                        }
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (state.isTranscribing) {
+                Button(
+                    onClick = onPickAndTranscribe,
+                    enabled = state.activeModelName != null && !state.isTranscribing && !state.isRecording,
+                ) {
+                    Text("Transcrire un WAV")
+                }
+            }
+
+            if (state.isTranscribing) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CircularProgressIndicator()
-                    Text("Transcription…")
-                } else {
-                    Text("Choisir un WAV et transcrire")
+                    Text("Transcription locale en cours…")
                 }
             }
 
@@ -95,6 +124,7 @@ fun IaPersoVoiceScreen(
 
 data class IaPersoVoiceUiState(
     val activeModelName: String? = null,
+    val isRecording: Boolean = false,
     val isTranscribing: Boolean = false,
     val transcript: String = "",
     val errorMessage: String? = null,
