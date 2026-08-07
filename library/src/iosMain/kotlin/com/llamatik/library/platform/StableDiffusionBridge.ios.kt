@@ -9,6 +9,7 @@ import com.llamatik.library.platform.sd.sd_release
 import com.llamatik.library.platform.sd.sd_txt2img_rgba
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.IntVar
+import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.pin
@@ -18,10 +19,8 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.value
 import platform.Foundation.NSBundle
 import platform.Foundation.NSFileManager
+import platform.Foundation.NSHomeDirectory
 import platform.Foundation.NSLog
-import platform.Foundation.NSSearchPathForDirectoriesInDomains
-import platform.Foundation.NSDocumentDirectory
-import platform.Foundation.NSUserDomainMask
 
 actual object StableDiffusionBridge {
 
@@ -30,36 +29,32 @@ actual object StableDiffusionBridge {
     actual fun getModelPath(modelFileName: String): String {
         val fm = NSFileManager.defaultManager
 
-        // 1. Model shipped inside the iOS application bundle.
+        // 1. Model bundled with the iOS app.
         val stem = modelFileName.substringBeforeLast('.', modelFileName)
         val ext = modelFileName.substringAfterLast('.', "")
-        val bundled = if (ext.isNotEmpty()) NSBundle.mainBundle.pathForResource(stem, ext) else null
+        val bundled = if (ext.isNotEmpty()) {
+            NSBundle.mainBundle.pathForResource(stem, ofType = ext)
+        } else {
+            NSBundle.mainBundle.pathForResource(stem, ofType = null)
+        }
         if (bundled != null && fm.fileExistsAtPath(bundled)) return bundled
 
-        // 2. Model downloaded by the app into Documents/models.
-        val documents = NSSearchPathForDirectoriesInDomains(
-            NSDocumentDirectory,
-            NSUserDomainMask,
-            true,
-        ).firstOrNull() as? String
-        if (documents != null) {
-            val candidates = listOf(
-                "$documents/models/$modelFileName",
-                "$documents/$modelFileName",
-            )
-            candidates.firstOrNull { fm.fileExistsAtPath(it) }?.let { return it }
-        }
+        // 2. Model downloaded by the app.
+        val documents = "${NSHomeDirectory()}/Documents"
+        val candidates = listOf(
+            "$documents/models/$modelFileName",
+            "$documents/$modelFileName",
+        )
+        candidates.firstOrNull { fm.fileExistsAtPath(it) }?.let { return it }
 
-        // Returning the requested name keeps diagnostics explicit in sd_init logs.
+        // Keep the missing file name visible in native diagnostics.
         return modelFileName
     }
 
     actual fun initModel(modelPath: String, threads: Int): Boolean {
         release()
-
         val ok = sd_init(modelPath, threads) != 0
         isInitialized = ok
-
         if (!ok) {
             NSLog("[StableDiffusionBridge] sd_init FAILED path=$modelPath")
         } else {
