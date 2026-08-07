@@ -1,13 +1,12 @@
 package com.llamatik.app
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -22,30 +21,24 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.llamatik.library.platform.StableDiffusionBridge
-import io.kamel.image.KamelImage
-import io.kamel.image.asyncPainterResource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.decodeToImageBitmap
 
 private const val IMAGE_SIZE = 512
 private const val DEFAULT_MODEL = "dreamshaper.safetensors"
 
-/**
- * IA Perso — interface volontairement minimale.
- *
- * Un prompt, un bouton, une image. Toute la navigation/chat de la démo Llamatik
- * est volontairement contournée ici. Le moteur reste StableDiffusionBridge
- * (stable-diffusion.cpp), donc la génération est locale et hors-ligne.
- */
+/** IA Perso : un prompt -> une image. Aucun chat, aucun menu. */
 @Composable
 fun MainApp() {
     MaterialTheme {
         var prompt by remember { mutableStateOf("") }
-        var imageBytes by remember { mutableStateOf<ByteArray?>(null) }
+        var image by remember { mutableStateOf<ImageBitmap?>(null) }
         var isGenerating by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
         var modelReady by remember { mutableStateOf(false) }
@@ -75,29 +68,29 @@ fun MainApp() {
                             isGenerating = true
                             error = null
                             try {
-                                val rgba = withContext(Dispatchers.Default) {
+                                val bmp = withContext(Dispatchers.Default) {
                                     if (!modelReady) {
                                         val modelPath = StableDiffusionBridge.getModelPath(DEFAULT_MODEL)
                                         modelReady = StableDiffusionBridge.initModel(modelPath, threads = 4)
                                         check(modelReady) {
-                                            "Modèle Stable Diffusion introuvable. Ajoute $DEFAULT_MODEL aux modèles de l’app."
+                                            "Modèle introuvable : $DEFAULT_MODEL"
                                         }
                                     }
 
-                                    StableDiffusionBridge.txt2img(
+                                    val rgba = StableDiffusionBridge.txt2img(
                                         prompt = prompt.trim(),
                                         width = IMAGE_SIZE,
                                         height = IMAGE_SIZE,
                                         steps = 20,
                                         cfgScale = 7.0f,
                                         seed = -1L,
-                                    ).also {
-                                        check(it.size == IMAGE_SIZE * IMAGE_SIZE * 4) {
-                                            "La génération n’a renvoyé aucune image."
-                                        }
+                                    )
+                                    check(rgba.size == IMAGE_SIZE * IMAGE_SIZE * 4) {
+                                        "La génération n’a renvoyé aucune image."
                                     }
+                                    rgbaToBmp(rgba, IMAGE_SIZE, IMAGE_SIZE).decodeToImageBitmap()
                                 }
-                                imageBytes = rgbaToBmp(rgba, IMAGE_SIZE, IMAGE_SIZE)
+                                image = bmp
                             } catch (t: Throwable) {
                                 error = t.message ?: "Erreur de génération"
                             } finally {
@@ -115,17 +108,12 @@ fun MainApp() {
                 ) {
                     when {
                         isGenerating -> CircularProgressIndicator()
-                        imageBytes != null -> {
-                            val painter = asyncPainterResource(data = imageBytes!!)
-                            KamelImage(
-                                resource = { painter },
-                                contentDescription = prompt,
-                                modifier = Modifier.fillMaxWidth(),
-                                contentScale = ContentScale.Fit,
-                                onLoading = { CircularProgressIndicator(modifier = Modifier.size(32.dp)) },
-                                onFailure = { Text("Image générée, mais impossible de l’afficher.") },
-                            )
-                        }
+                        image != null -> Image(
+                            bitmap = image!!,
+                            contentDescription = prompt,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit,
+                        )
                         error != null -> Text(error!!, color = MaterialTheme.colorScheme.error)
                     }
                 }
@@ -134,8 +122,10 @@ fun MainApp() {
     }
 }
 
-/** Encode les pixels RGBA natifs de stable-diffusion.cpp en BMP 32 bits.
- * Kamel/Skia peut ensuite les afficher sans ajouter de codec ou de dépendance.
+/**
+ * stable-diffusion.cpp renvoie du RGBA brut. Compose sait décoder BMP sur les
+ * cibles mobiles/desktop ; on encapsule donc les pixels dans un BMP 32 bits,
+ * sans dépendance de codec ni serveur intermédiaire.
  */
 private fun rgbaToBmp(rgba: ByteArray, width: Int, height: Int): ByteArray {
     require(rgba.size == width * height * 4)
