@@ -13,10 +13,10 @@ permissions:
   contents: read
 
 jobs:
-  shared-metadata:
-    name: Compile shared metadata
+  shared-checks:
+    name: Compile shared code and run JVM tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -33,8 +33,8 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Compile common Kotlin metadata
-        run: ./gradlew :shared:compileKotlinMetadata --stacktrace
+      - name: Compile and test shared code
+        run: ./gradlew :shared:compileKotlinMetadata :shared:jvmTest --stacktrace
 
   ios-simulator:
     name: Compile iOS simulator target
