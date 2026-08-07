@@ -36,10 +36,10 @@ jobs:
       - name: Compile and test shared code
         run: ./gradlew :shared:compileKotlinMetadata :shared:jvmTest --stacktrace
 
-  ios-simulator:
-    name: Compile iOS simulator target
+  ios:
+    name: Compile iPhone and iOS simulator targets
     runs-on: macos-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -55,6 +55,9 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Compile shared code for real iPhone
+        run: ./gradlew :shared:compileKotlinIosArm64 --stacktrace
 
       - name: Compile shared code for iOS simulator
         run: ./gradlew :shared:compileKotlinIosSimulatorArm64 --stacktrace
