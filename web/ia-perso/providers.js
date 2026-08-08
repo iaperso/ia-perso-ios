@@ -1,6 +1,5 @@
-const OPENVERSE = 'https://api.openverse.org/v1/images/';
 const GENERATION_TIMEOUT_MS = 90000;
-const OPENVERSE_TIMEOUT_MS = 8000;
+const REFERENCES_TIMEOUT_MS = 8000;
 
 export function newRequestId() {
   return (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^a-zA-Z0-9_-]/g, '');
@@ -33,48 +32,17 @@ export async function generateRemote(prompt, { size = 512, requestId } = {}) {
   return payload;
 }
 
-function buildOpenverseUrl(prompt) {
-  const u = new URL(OPENVERSE);
-  u.searchParams.set('q', prompt);
-  u.searchParams.set('page_size', '3');
-  u.searchParams.set('page', '1');
-  u.searchParams.set('filter_dead', 'true');
-  u.searchParams.set('unstable__include_sensitive_results', 'true');
-  return u.toString();
-}
-
-function normalizeSensitivity(value) {
-  if (!Array.isArray(value)) return [];
-  return value.map((entry) => typeof entry === 'string' ? entry : (entry?.name || entry?.label || '')).filter(Boolean);
-}
-
-function normalizeReference(item) {
-  if (!item?.id) return null;
-  const sensitivity = normalizeSensitivity(item.unstable__sensitivity);
-  return {
-    id: item.id,
-    title: item.title || 'Référence visuelle',
-    creator: item.creator || '',
-    source: item.source || item.provider || 'Openverse',
-    license: item.license || '',
-    landingUrl: item.foreign_landing_url || item.url || '#',
-    thumbUrl: `https://api.openverse.org/v1/images/${encodeURIComponent(item.id)}/thumb/?compressed=true`,
-    sensitive: sensitivity.length > 0 || item.mature === true,
-    sensitivity
-  };
-}
-
 export async function findReferences(prompt) {
   try {
-    const response = await fetchWithTimeout(buildOpenverseUrl(prompt), {
+    const response = await fetchWithTimeout(`/api/references?q=${encodeURIComponent(prompt)}`, {
       headers: { Accept: 'application/json' },
       referrerPolicy: 'no-referrer'
-    }, OPENVERSE_TIMEOUT_MS);
-    if (!response.ok) throw new Error(`Openverse HTTP ${response.status}`);
-    const payload = await response.json();
-    return (payload?.results || []).map(normalizeReference).filter(Boolean).slice(0, 3);
+    }, REFERENCES_TIMEOUT_MS);
+    if (!response.ok) return [];
+    const payload = await response.json().catch(() => ({}));
+    return Array.isArray(payload?.results) ? payload.results.slice(0, 3) : [];
   } catch (error) {
-    console.warn('Openverse indisponible ou trop lent', error);
+    console.warn('Google Images indisponible ou trop lent', error);
     return [];
   }
 }
