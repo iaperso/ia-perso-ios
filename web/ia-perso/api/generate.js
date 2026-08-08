@@ -10,6 +10,13 @@ function cleanPrompt(value) {
   return String(value || '').trim().slice(0, MAX_PROMPT);
 }
 
+export function enhancePrompt(prompt) {
+  const base = cleanPrompt(prompt);
+  if (!base) return base;
+  const guidance = ' Composition impérative : représenter clairement tous les sujets, personnes, objets, vêtements, attributs et relations explicitement demandés ; ne rien omettre. Les personnes mentionnées doivent être nettement visibles et reconnaissables dans la scène. Respecter fidèlement le nombre, la position relative et les détails décrits.';
+  return `${base}.${guidance}`.slice(0, MAX_PROMPT);
+}
+
 function json(res, status, body, extra = {}) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -140,9 +147,10 @@ async function callPollinations({ prompt, size, requestId }) {
 }
 
 async function generateOnce({ prompt, size, requestId, fingerprint }) {
-  const cloudflare = await callCloudflare({ prompt, size, requestId, fingerprint });
+  const effectivePrompt = enhancePrompt(prompt);
+  const cloudflare = await callCloudflare({ prompt: effectivePrompt, size, requestId, fingerprint });
   if (cloudflare) return cloudflare;
-  return callPollinations({ prompt, size: Math.min(size, 768), requestId });
+  return callPollinations({ prompt: effectivePrompt, size: Math.min(size, 768), requestId });
 }
 
 function pruneCompleted(now = Date.now()) {
