@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 const MAX_PROMPT = 1800;
 const CACHE_TTL_SECONDS = 3600;
+const MAX_IMAGE_BYTES = 3_500_000;
 const inFlight = new Map();
 const completed = new Map();
 
@@ -91,20 +92,57 @@ async function callCloudflare({ prompt, size, requestId, fingerprint }) {
 }
 
 function pollinationsUrl(prompt, size, requestId) {
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${size}&height=${size}&model=flux&safe=true&seed=${seedFor(requestId)}`;
+  const u = new URL(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`);
+  u.searchParams.set('width', String(size));
+  u.searchParams.set('height', String(size));
+  u.searchParams.set('model', 'flux');
+  u.searchParams.set('safe', 'false');
+  u.searchParams.set('seed', String(seedFor(requestId)));
+  return u.toString();
+}
+
+async function callPollinations({ prompt, size, requestId }) {
+  const response = await fetch(pollinationsUrl(prompt, size, requestId), {
+    headers: { Accept: 'image/*' },
+    redirect: 'follow'
+  });
+  const contentType = (response.headers.get('content-type') || '').split(';')[0].trim();
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    const err = new Error(`Pollinations HTTP ${response.status}${text ? `: ${text.slice(0, 160)}` : ''}`);
+    err.status = response.status;
+    throw err;
+  }
+  if (!contentType.startsWith('image/')) {
+    const text = await response.text().catch(() => '');
+    const err = new Error(`Pollinations a renvoyé ${contentType || 'un contenu inconnu'} au lieu d’une image${text ? `: ${text.slice(0, 160)}` : ''}.`);
+    err.status = 502;
+    throw err;
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (!bytes.length) {
+    const err = new Error('Pollinations a renvoyé une image vide.');
+    err.status = 502;
+    throw err;
+  }
+  if (bytes.length > MAX_IMAGE_BYTES) {
+    const err = new Error('Image trop volumineuse pour le transfert mobile.');
+    err.status = 502;
+    throw err;
+  }
+  return {
+    dataUri: `data:${contentType};base64,${bytes.toString('base64')}`,
+    provider: 'pollinations',
+    model: 'flux',
+    size,
+    degraded: true
+  };
 }
 
 async function generateOnce({ prompt, size, requestId, fingerprint }) {
   const cloudflare = await callCloudflare({ prompt, size, requestId, fingerprint });
   if (cloudflare) return cloudflare;
-  const fallbackSize = Math.min(size, 768);
-  return {
-    imageUrl: pollinationsUrl(prompt, fallbackSize, requestId),
-    provider: 'pollinations',
-    model: 'flux',
-    size: fallbackSize,
-    degraded: true
-  };
+  return callPollinations({ prompt, size: Math.min(size, 768), requestId });
 }
 
 function pruneCompleted(now = Date.now()) {
@@ -157,7 +195,7 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('generation_failed', { requestId, message: error?.message, status: error?.status });
     const status = Number(error?.status) || 502;
-    return json(res, status, { error: error?.message || 'Échec de génération.', provider: 'cloudflare' });
+    return json(res, status, { error: error?.message || 'Échec de génération.' });
   } finally {
     inFlight.delete(requestId);
   }
