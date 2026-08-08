@@ -33,18 +33,24 @@ export async function generateRemote(prompt, { size = 512, requestId } = {}) {
   return payload;
 }
 
-function buildOpenverseUrl(prompt, mature) {
+function buildOpenverseUrl(prompt, includeSensitive = false) {
   const u = new URL(OPENVERSE);
   u.searchParams.set('q', prompt);
   u.searchParams.set('page_size', '3');
   u.searchParams.set('page', '1');
-  u.searchParams.set('mature', mature ? 'true' : 'false');
   u.searchParams.set('filter_dead', 'true');
+  if (includeSensitive) u.searchParams.set('unstable__include_sensitive_results', 'true');
   return u.toString();
+}
+
+function normalizeSensitivity(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => typeof entry === 'string' ? entry : (entry?.name || entry?.label || '')).filter(Boolean);
 }
 
 function normalizeReference(item) {
   if (!item?.id) return null;
+  const sensitivity = normalizeSensitivity(item.unstable__sensitivity);
   return {
     id: item.id,
     title: item.title || 'Référence visuelle',
@@ -52,12 +58,14 @@ function normalizeReference(item) {
     source: item.source || item.provider || 'Openverse',
     license: item.license || '',
     landingUrl: item.foreign_landing_url || item.url || '#',
-    thumbUrl: `https://api.openverse.org/v1/images/${encodeURIComponent(item.id)}/thumb/?compressed=true`
+    thumbUrl: `https://api.openverse.org/v1/images/${encodeURIComponent(item.id)}/thumb/?compressed=true`,
+    sensitive: sensitivity.length > 0 || item.mature === true,
+    sensitivity
   };
 }
 
-async function searchOpenverseOnce(prompt, mature) {
-  const response = await fetchWithTimeout(buildOpenverseUrl(prompt, mature), {
+async function searchOpenverseOnce(prompt, includeSensitive = false) {
+  const response = await fetchWithTimeout(buildOpenverseUrl(prompt, includeSensitive), {
     headers: { Accept: 'application/json' },
     referrerPolicy: 'no-referrer'
   }, OPENVERSE_TIMEOUT_MS);
