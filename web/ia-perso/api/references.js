@@ -2,7 +2,7 @@ const MAX_QUERY = 500;
 const EDGE_TTL_SECONDS = 86400;
 const EDGE_STALE_SECONDS = 604800;
 const FETCH_TIMEOUT_MS = 1800;
-const GOOGLE_RESULT_LIMIT = 3;
+const WEB_RESULT_LIMIT = 3;
 const BLUESKY_RESULT_LIMIT = 5;
 
 function json(res, status, body, cache = false) {
@@ -62,6 +62,34 @@ function uniqueTop(items, limit) {
   return results;
 }
 
+function compactEnglishQuery(q) {
+  const replacements = [
+    [/\bchatons?\b/gi, 'kitten'],
+    [/\bchats?\b/gi, 'cat'],
+    [/\bchiens?\b/gi, 'dog'],
+    [/\bhommes?\b/gi, 'man'],
+    [/\bfemmes?\b/gi, 'woman'],
+    [/\bpersonnes?\b/gi, 'person'],
+    [/\btorse nu\b/gi, 'shirtless'],
+    [/\bcinquantaine\b/gi, '50s'],
+    [/\bsoixantaine\b/gi, '60s'],
+    [/\bgrisonnant(e)?s?\b/gi, 'gray-haired'],
+    [/\bcheveux\b/gi, 'hair'],
+    [/\bbarbe\b/gi, 'beard'],
+    [/\bdebout\b/gi, 'standing'],
+    [/\bassis(e)?\b/gi, 'sitting'],
+    [/\bcuisine\b/gi, 'kitchen'],
+    [/\bplage\b/gi, 'beach'],
+    [/\bmontagne\b/gi, 'mountain'],
+    [/\bphotographie\b/gi, 'photograph'],
+    [/\bphoto\b/gi, 'photo'],
+    [/\bréaliste\b/gi, 'realistic']
+  ];
+  let translated = clean(q);
+  for (const [pattern, value] of replacements) translated = translated.replace(pattern, value);
+  return translated === clean(q) ? '' : translated;
+}
+
 async function googleReferences(q, promptWords) {
   const key = process.env.GOOGLE_CSE_API_KEY;
   const cx = process.env.GOOGLE_CSE_CX;
@@ -95,7 +123,7 @@ async function googleReferences(q, promptWords) {
       id: `google-${item.cacheId || item.link || index}`,
       title: item.title || 'Référence Google Images',
       creator: item.displayLink || 'Google Images France',
-      source: 'Google Images France',
+      source: 'Google Images',
       sourceType: 'google',
       license: '',
       landingUrl,
@@ -106,7 +134,50 @@ async function googleReferences(q, promptWords) {
     };
   }).filter(Boolean);
 
-  return { configured: true, results: uniqueTop(candidates, GOOGLE_RESULT_LIMIT) };
+  return { configured: true, results: uniqueTop(candidates, WEB_RESULT_LIMIT) };
+}
+
+async function commonsReferences(q, promptWords) {
+  const url = new URL('https://commons.wikimedia.org/w/api.php');
+  url.searchParams.set('action', 'query');
+  url.searchParams.set('format', 'json');
+  url.searchParams.set('formatversion', '2');
+  url.searchParams.set('generator', 'search');
+  url.searchParams.set('gsrsearch', q);
+  url.searchParams.set('gsrnamespace', '6');
+  url.searchParams.set('gsrlimit', '8');
+  url.searchParams.set('prop', 'imageinfo');
+  url.searchParams.set('iiprop', 'url|user');
+  url.searchParams.set('iiurlwidth', '480');
+  url.searchParams.set('origin', '*');
+
+  const { response, payload } = await fetchJson(url, {
+    headers: { Accept: 'application/json', 'Api-User-Agent': 'IA-Perso/1.0 (visual reference search)' }
+  });
+  if (!response?.ok) return [];
+
+  const candidates = (payload?.query?.pages || []).map((page) => {
+    const info = Array.isArray(page?.imageinfo) ? page.imageinfo[0] : null;
+    const landingUrl = String(info?.descriptionurl || '').trim();
+    const thumbUrl = String(info?.thumburl || info?.url || '').trim();
+    const title = clean(String(page?.title || '').replace(/^File:/i, ''));
+    if (!/^https:\/\//i.test(landingUrl) || !/^https:\/\//i.test(thumbUrl)) return null;
+    return {
+      id: `commons-${page?.pageid || thumbUrl}`,
+      title: title || 'Référence Wikimedia Commons',
+      creator: info?.user || 'Wikimedia Commons',
+      source: 'Wikimedia Commons',
+      sourceType: 'commons',
+      license: 'Média libre — voir la fiche source',
+      landingUrl,
+      thumbUrl,
+      sensitive: false,
+      sensitivity: [],
+      _score: score(title, promptWords) + 1
+    };
+  }).filter(Boolean);
+
+  return uniqueTop(candidates, WEB_RESULT_LIMIT);
 }
 
 function hasMandatoryBlueskyRestriction(post) {
@@ -125,9 +196,10 @@ function blueskyLandingUrl(post) {
   return handle && rkey ? `https://bsky.app/profile/${encodeURIComponent(handle)}/post/${encodeURIComponent(rkey)}` : '';
 }
 
-async function blueskyReferences(q, promptWords) {
+async function blueskyQuery(query, promptWords) {
+  if (!query) return [];
   const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts');
-  url.searchParams.set('q', q);
+  url.searchParams.set('q', query);
   url.searchParams.set('sort', 'top');
   url.searchParams.set('limit', '20');
 
@@ -161,32 +233,46 @@ async function blueskyReferences(q, promptWords) {
       });
     }
   }
-  return uniqueTop(candidates, BLUESKY_RESULT_LIMIT);
+  return candidates;
+}
+
+async function blueskyReferences(q, promptWords) {
+  const english = compactEnglishQuery(q);
+  const scoreWords = [...new Set([...promptWords, ...words(english)])];
+  const batches = await Promise.all([
+    blueskyQuery(q, scoreWords),
+    english ? blueskyQuery(english, scoreWords) : Promise.resolve([])
+  ]);
+  return uniqueTop(batches.flat(), BLUESKY_RESULT_LIMIT);
 }
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, { error: 'Méthode non autorisée.' });
 
   const q = clean(req.query?.q);
-  if (!q) return json(res, 200, { results: [], google: [], bluesky: [] });
+  if (!q) return json(res, 200, { results: [], web: [], google: [], commons: [], bluesky: [] });
 
   try {
     const promptWords = [...new Set(words(q))];
-    const [google, bluesky] = await Promise.all([
+    const [google, commons, bluesky] = await Promise.all([
       googleReferences(q, promptWords),
+      commonsReferences(q, promptWords),
       blueskyReferences(q, promptWords)
     ]);
-    const results = [...google.results, ...bluesky];
+    const web = uniqueTop([...google.results.map((item) => ({ ...item, _score: 2 })), ...commons.map((item) => ({ ...item, _score: 1 }))], WEB_RESULT_LIMIT);
+    const results = [...web, ...bluesky];
     return json(res, 200, {
       results,
+      web,
       google: google.results,
+      commons,
       bluesky,
-      providers: ['google-images-fr', 'bluesky-public'],
+      providers: ['google-images-fr', 'wikimedia-commons', 'bluesky-public'],
       googleConfigured: google.configured,
-      limits: { google: GOOGLE_RESULT_LIMIT, bluesky: BLUESKY_RESULT_LIMIT }
+      limits: { web: WEB_RESULT_LIMIT, bluesky: BLUESKY_RESULT_LIMIT }
     }, results.length > 0);
   } catch (error) {
     console.error('reference_search_failed', { message: error?.message });
-    return json(res, 200, { results: [], google: [], bluesky: [], providers: ['google-images-fr', 'bluesky-public'] });
+    return json(res, 200, { results: [], web: [], google: [], commons: [], bluesky: [], providers: ['google-images-fr', 'wikimedia-commons', 'bluesky-public'] });
   }
 }
