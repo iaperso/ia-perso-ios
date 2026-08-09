@@ -14,7 +14,7 @@ function cleanPrompt(value) {
 export function enhancePrompt(prompt) {
   const base = cleanPrompt(prompt);
   if (!base) return base;
-  const guidance = ' Composition impérative : représenter clairement tous les sujets, personnes, objets, vêtements, attributs et relations explicitement demandés ; ne rien omettre. Les personnes mentionnées doivent être nettement visibles et reconnaissables dans la scène. Respecter fidèlement le nombre, la position relative et les détails décrits.';
+  const guidance = ' Composition impérative : représenter clairement tous les sujets, personnes, objets, attributs et relations explicitement demandés ; ne rien omettre. Les personnes mentionnées doivent être nettement visibles et reconnaissables dans la scène. Respecter fidèlement le nombre, la position relative et les détails décrits. Par défaut, lorsque le prompt ne précise pas une autre origine, région ou esthétique, privilégier un rendu européen contemporain, naturel et photoréaliste, avec des proportions réalistes et sans stylisation artificielle.';
   return `${base}.${guidance}`.slice(0, MAX_PROMPT);
 }
 
