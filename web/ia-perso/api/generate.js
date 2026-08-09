@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 
 const MAX_PROMPT = 1800;
 const CACHE_TTL_SECONDS = 3600;
-const VISION_CACHE_TTL_SECONDS = 86400;
 const MAX_IMAGE_BYTES = 3_500_000;
 const MAX_IMAGE_SEED = 2147483647;
 const DISCOVERY_TIMEOUT_MS = 450;
@@ -212,24 +211,12 @@ async function discoverBluesky(prompt, promptWords) {
 async function inspectWithMoondream(candidate, prompt) {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
-  const gatewayId = process.env.CLOUDFLARE_AI_GATEWAY_ID || 'default';
   if (!accountId || !token || !candidate?.imageUrl) return null;
   const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/@cf/moondream/moondream3.1-9B-A2B`;
-  const normalizedPrompt = cleanPrompt(prompt).slice(0, 500);
-  const question = `Compare cette image à la demande suivante : "${normalizedPrompt}". Réponds uniquement en français. Si l'image est visuellement pertinente, commence exactement par "PERTINENT:" puis donne en une phrase très courte uniquement des caractéristiques visuelles générales utiles (sujet, âge apparent, morphologie, posture, cadrage, décor, lumière). Si elle est hors sujet, commence exactement par "HORS SUJET:". N'identifie aucune personne et ne copie aucun texte de l'image.`;
-  const visionCacheKey = `ia-perso:vision:${hash(`${candidate.imageUrl}\n${normalizedPrompt}`)}`;
+  const question = `Compare cette image à la demande suivante : "${cleanPrompt(prompt).slice(0, 500)}". Réponds uniquement en français. Si l'image est visuellement pertinente, commence exactement par "PERTINENT:" puis donne en une phrase très courte uniquement des caractéristiques visuelles générales utiles (sujet, âge apparent, morphologie, posture, cadrage, décor, lumière). Si elle est hors sujet, commence exactement par "HORS SUJET:". N'identifie aucune personne et ne copie aucun texte de l'image.`;
   const payload = await fetchJson(endpoint, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      'cf-aig-gateway-id': gatewayId,
-      'cf-aig-cache-key': visionCacheKey,
-      'cf-aig-cache-ttl': String(VISION_CACHE_TTL_SECONDS),
-      'cf-aig-request-timeout': String(VISION_TIMEOUT_MS),
-      'cf-aig-max-attempts': '1',
-      'cf-aig-collect-log': 'false',
-    },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       task: 'query',
       image: candidate.imageUrl,
@@ -237,12 +224,12 @@ async function inspectWithMoondream(candidate, prompt) {
       reasoning: false,
       stream: false,
       temperature: 0,
-      max_tokens: 48,
+      max_tokens: 90,
     }),
   }, VISION_TIMEOUT_MS);
-  const answer = cleanHint(payload?.result?.answer ?? payload?.answer ?? payload?.result?.response ?? '', 260);
+  const answer = cleanHint(payload?.result?.answer ?? payload?.answer ?? payload?.result?.response ?? '', 360);
   if (!/^PERTINENT\s*:/i.test(answer)) return null;
-  const hint = cleanHint(answer.replace(/^PERTINENT\s*:\s*/i, ''), 220);
+  const hint = cleanHint(answer.replace(/^PERTINENT\s*:\s*/i, ''), 300);
   return hint ? { hint, source: candidate.source } : null;
 }
 
