@@ -1,14 +1,21 @@
 const MAX_QUERY = 500;
+const EDGE_TTL_SECONDS = 86400;
+const EDGE_STALE_SECONDS = 604800;
 
-function json(res, status, body) {
+function json(res, status, body, cache = false) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'private, max-age=0, no-store');
+  if (cache && status === 200) {
+    res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    res.setHeader('Vercel-CDN-Cache-Control', `public, s-maxage=${EDGE_TTL_SECONDS}, stale-while-revalidate=${EDGE_STALE_SECONDS}, stale-if-error=${EDGE_STALE_SECONDS}`);
+  } else {
+    res.setHeader('Cache-Control', 'private, max-age=0, no-store');
+  }
   res.end(JSON.stringify(body));
 }
 
 function clean(value) {
-  return String(value || '').trim().slice(0, MAX_QUERY);
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, MAX_QUERY);
 }
 
 export default async function handler(req, res) {
@@ -49,5 +56,5 @@ export default async function handler(req, res) {
     sensitivity: []
   })).filter((item) => item.thumbUrl && item.landingUrl !== '#');
 
-  return json(res, 200, { results, provider: 'google-images', configured: true });
+  return json(res, 200, { results, provider: 'google-images', configured: true }, true);
 }
