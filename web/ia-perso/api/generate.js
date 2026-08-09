@@ -52,6 +52,11 @@ function extractBase64(payload) {
   return payload?.result?.image || payload?.image || payload?.result?.result?.image || null;
 }
 
+function isRetryableProviderFailure(error) {
+  const status = Number(error?.status) || 0;
+  return !status || status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
 async function callCloudflare({ prompt, size, requestId, fingerprint }) {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
@@ -65,7 +70,10 @@ async function callCloudflare({ prompt, size, requestId, fingerprint }) {
     'cf-aig-gateway-id': gatewayId,
     'cf-aig-cache-key': cacheKey(requestId, fingerprint),
     'cf-aig-cache-ttl': String(CACHE_TTL_SECONDS),
-    'cf-aig-max-attempts': '1',
+    'cf-aig-request-timeout': '30000',
+    'cf-aig-max-attempts': '2',
+    'cf-aig-retry-delay': '250',
+    'cf-aig-backoff': 'exponential',
     'cf-aig-collect-log': 'true',
     'cf-aig-collect-log-payload': 'false',
     'cf-aig-metadata': JSON.stringify({ app: 'ia-perso', requestId, size, model })
@@ -95,7 +103,11 @@ async function callCloudflare({ prompt, size, requestId, fingerprint }) {
     throw err;
   }
   const image = extractBase64(payload);
-  if (!image) throw new Error('Cloudflare n’a retourné aucune image exploitable.');
+  if (!image) {
+    const err = new Error('Cloudflare n’a retourné aucune image exploitable.');
+    err.status = 502;
+    throw err;
+  }
   return { dataUri: `data:image/jpeg;base64,${image}`, provider: 'cloudflare', model, size };
 }
 
@@ -149,8 +161,13 @@ async function callPollinations({ prompt, size, requestId }) {
 
 async function generateOnce({ prompt, size, requestId, fingerprint }) {
   const effectivePrompt = enhancePrompt(prompt);
-  const cloudflare = await callCloudflare({ prompt: effectivePrompt, size, requestId, fingerprint });
-  if (cloudflare) return cloudflare;
+  try {
+    const cloudflare = await callCloudflare({ prompt: effectivePrompt, size, requestId, fingerprint });
+    if (cloudflare) return cloudflare;
+  } catch (error) {
+    if (!isRetryableProviderFailure(error)) throw error;
+    console.warn('cloudflare_transient_fallback', { requestId, status: error?.status || 0, message: error?.message });
+  }
   return callPollinations({ prompt: effectivePrompt, size: Math.min(size, 768), requestId });
 }
 
