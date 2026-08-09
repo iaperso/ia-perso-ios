@@ -18,15 +18,10 @@ function clean(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').slice(0, MAX_QUERY);
 }
 
-export default async function handler(req, res) {
-  if (req.method !== 'GET') return json(res, 405, { error: 'Méthode non autorisée.' });
-
-  const q = clean(req.query?.q);
-  if (!q) return json(res, 200, { results: [] });
-
+async function googleReferences(q) {
   const key = process.env.GOOGLE_CSE_API_KEY;
   const cx = process.env.GOOGLE_CSE_CX;
-  if (!key || !cx) return json(res, 200, { results: [], provider: 'google-images', configured: false });
+  if (!key || !cx) return null;
 
   const url = new URL('https://www.googleapis.com/customsearch/v1');
   url.searchParams.set('key', key);
@@ -41,10 +36,10 @@ export default async function handler(req, res) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     console.error('google_images_failed', { status: response.status, message: payload?.error?.message });
-    return json(res, 200, { results: [], provider: 'google-images', configured: true });
+    return null;
   }
 
-  const results = (payload?.items || []).slice(0, 3).map((item, index) => ({
+  return (payload?.items || []).slice(0, 3).map((item, index) => ({
     id: item.cacheId || item.link || String(index),
     title: item.title || 'Référence Google Images',
     creator: item.displayLink || '',
@@ -55,6 +50,65 @@ export default async function handler(req, res) {
     sensitive: false,
     sensitivity: []
   })).filter((item) => item.thumbUrl && item.landingUrl !== '#');
+}
 
-  return json(res, 200, { results, provider: 'google-images', configured: true }, true);
+async function commonsReferences(q) {
+  const url = new URL('https://commons.wikimedia.org/w/api.php');
+  url.searchParams.set('action', 'query');
+  url.searchParams.set('generator', 'search');
+  url.searchParams.set('gsrsearch', q);
+  url.searchParams.set('gsrnamespace', '6');
+  url.searchParams.set('gsrlimit', '3');
+  url.searchParams.set('prop', 'imageinfo|info');
+  url.searchParams.set('iiprop', 'url|mime');
+  url.searchParams.set('iiurlwidth', '640');
+  url.searchParams.set('inprop', 'url');
+  url.searchParams.set('format', 'json');
+  url.searchParams.set('formatversion', '2');
+
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'IA-Perso/1.0 visual-reference-search'
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`Wikimedia Commons HTTP ${response.status}`);
+
+  const pages = Array.isArray(payload?.query?.pages) ? payload.query.pages : [];
+  return pages.map((page, index) => {
+    const info = Array.isArray(page.imageinfo) ? page.imageinfo[0] : null;
+    const thumbUrl = info?.thumburl || info?.url || '';
+    return {
+      id: `commons-${page.pageid || index}`,
+      title: String(page.title || '').replace(/^File:/, '') || 'Référence Wikimedia Commons',
+      creator: '',
+      source: 'Wikimedia Commons',
+      license: '',
+      landingUrl: page.fullurl || `https://commons.wikimedia.org/wiki/${encodeURIComponent(String(page.title || '').replace(/ /g, '_'))}`,
+      thumbUrl,
+      sensitive: false,
+      sensitivity: []
+    };
+  }).filter((item) => item.thumbUrl && item.landingUrl).slice(0, 3);
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'GET') return json(res, 405, { error: 'Méthode non autorisée.' });
+
+  const q = clean(req.query?.q);
+  if (!q) return json(res, 200, { results: [] });
+
+  try {
+    const google = await googleReferences(q);
+    if (google?.length) {
+      return json(res, 200, { results: google, provider: 'google-images', configured: true }, true);
+    }
+
+    const commons = await commonsReferences(q);
+    return json(res, 200, { results: commons, provider: 'wikimedia-commons', configured: true }, true);
+  } catch (error) {
+    console.error('reference_search_failed', { message: error?.message });
+    return json(res, 200, { results: [], provider: 'reference-fallback', configured: true });
+  }
 }
