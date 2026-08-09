@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 const MAX_PROMPT = 1800;
 const CACHE_TTL_SECONDS = 3600;
 const MAX_IMAGE_BYTES = 3_500_000;
+const MAX_IMAGE_SEED = 2147483647;
 const inFlight = new Map();
 const completed = new Map();
 
@@ -43,8 +44,8 @@ function cacheKey(requestId, fingerprint) {
   return `ia-perso:${hash(`${requestId}:${fingerprint}`)}`;
 }
 
-function seedFor(requestId) {
-  return parseInt(hash(requestId).slice(0, 8), 16) >>> 0;
+export function seedFor(requestId) {
+  return parseInt(hash(requestId).slice(0, 8), 16) % (MAX_IMAGE_SEED + 1);
 }
 
 function extractBase64(payload) {
