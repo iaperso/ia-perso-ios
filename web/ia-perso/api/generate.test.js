@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import handler, { enhancePrompt } from './generate.js';
+import handler, { collectVisualHints, enhancePrompt } from './generate.js';
 
 function invoke(body, method = 'POST') {
   return new Promise((resolve, reject) => {
@@ -22,6 +22,8 @@ function withoutCloudflare() {
   delete process.env.CLOUDFLARE_ACCOUNT_ID;
   delete process.env.CLOUDFLARE_API_TOKEN;
   delete process.env.CLOUDFLARE_AI_GATEWAY_ID;
+  delete process.env.GOOGLE_CSE_API_KEY;
+  delete process.env.GOOGLE_CSE_CX;
 }
 
 function imageResponse(bytes = 'abc') {
@@ -35,6 +37,13 @@ test('enhancePrompt preserves the request and requires every explicit subject to
   assert.match(enhanced, /tous les sujets/);
   assert.match(enhanced, /personnes mentionnées doivent être nettement visibles/);
   assert.ok(enhanced.length <= 1800);
+});
+
+test('visual hints never override the explicit request', () => {
+  const enhanced = enhancePrompt('Un chaton roux', 'pelage gris ; lumière douce');
+  assert.match(enhanced, /^Un chaton roux\./);
+  assert.match(enhanced, /Ne jamais reproduire une image précise/);
+  assert.match(enhanced, /ni contredire, remplacer ou affaiblir un élément explicitement demandé/);
 });
 
 test('rejects methods other than POST', async () => {
@@ -102,7 +111,9 @@ test('Cloudflare Klein keeps payload private, disables retries and receives enha
   const originalFetch = globalThis.fetch;
   let captured;
   globalThis.fetch = async (url, options) => {
-    captured = { url: String(url), options };
+    const target = String(url);
+    if (target.startsWith('https://api.bsky.app/')) return Response.json({ posts: [] });
+    captured = { url: target, options };
     return new Response(JSON.stringify({ success: true, result: { image: 'YWJj' } }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
   try {
@@ -128,7 +139,9 @@ test('Cloudflare HD route selects Schnell with four steps', async () => {
   const originalFetch = globalThis.fetch;
   let captured;
   globalThis.fetch = async (url, options) => {
-    captured = { url: String(url), options };
+    const target = String(url);
+    if (target.startsWith('https://api.bsky.app/')) return Response.json({ posts: [] });
+    captured = { url: target, options };
     return new Response(JSON.stringify({ success: true, result: { image: 'YWJj' } }), { status: 200 });
   };
   try {
@@ -141,6 +154,70 @@ test('Cloudflare HD route selects Schnell with four steps', async () => {
     assert.equal(body.steps, 4);
     assert.match(body.prompt, /ne rien omettre/);
     assert.equal(Number.isInteger(body.seed), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    withoutCloudflare();
+  }
+});
+
+test('collectVisualHints reads Google and Bluesky pixels with Moondream and keeps relevant observations', async () => {
+  process.env.CLOUDFLARE_ACCOUNT_ID = 'account-test';
+  process.env.CLOUDFLARE_API_TOKEN = 'token-test';
+  process.env.GOOGLE_CSE_API_KEY = 'google-test';
+  process.env.GOOGLE_CSE_CX = 'cx-test';
+  const originalFetch = globalThis.fetch;
+  let moonCalls = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    const target = String(url);
+    if (target.startsWith('https://www.googleapis.com/customsearch/v1')) {
+      assert.match(target, /safe=off/);
+      assert.match(target, /gl=fr/);
+      return Response.json({ items: [{ title: 'Chaton roux', link: 'https://images.example/cat.jpg', snippet: 'petit chat roux' }] });
+    }
+    if (target.startsWith('https://api.bsky.app/xrpc/app.bsky.feed.searchPosts')) {
+      return Response.json({ posts: [{ record: { text: 'mon chaton joue' }, embed: { images: [{ fullsize: 'https://cdn.bsky.example/kitten.jpg', thumb: 'https://cdn.bsky.example/kitten-thumb.jpg', alt: 'chaton gris qui joue' }] }, labels: [] }] });
+    }
+    if (target.includes('/moondream/moondream3.1-9B-A2B')) {
+      moonCalls += 1;
+      const body = JSON.parse(options.body);
+      assert.equal(body.reasoning, false);
+      assert.equal(body.stream, false);
+      return Response.json({ success: true, result: { answer: 'PERTINENT: jeune chat, grands yeux, pelage doux, cadrage rapproché' } });
+    }
+    throw new Error(`unexpected ${target}`);
+  };
+  try {
+    const result = await collectVisualHints('chaton');
+    assert.equal(moonCalls, 2);
+    assert.equal(result.accepted, 2);
+    assert.deepEqual(result.sources.sort(), ['bluesky-public', 'google-images-fr']);
+    assert.match(result.hints, /grands yeux/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    withoutCloudflare();
+  }
+});
+
+test('Bluesky public restrictions are respected during reference discovery', async () => {
+  process.env.CLOUDFLARE_ACCOUNT_ID = 'account-test';
+  process.env.CLOUDFLARE_API_TOKEN = 'token-test';
+  const originalFetch = globalThis.fetch;
+  let moonCalls = 0;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (target.startsWith('https://api.bsky.app/xrpc/app.bsky.feed.searchPosts')) {
+      return Response.json({ posts: [{ record: { text: 'chaton' }, labels: [{ val: '!no-unauthenticated' }], embed: { images: [{ fullsize: 'https://cdn.example/private.jpg' }] } }] });
+    }
+    if (target.includes('/moondream/')) {
+      moonCalls += 1;
+      return Response.json({ result: { answer: 'PERTINENT: x' } });
+    }
+    throw new Error(`unexpected ${target}`);
+  };
+  try {
+    const result = await collectVisualHints('chaton');
+    assert.equal(moonCalls, 0);
+    assert.equal(result.hints, '');
   } finally {
     globalThis.fetch = originalFetch;
     withoutCloudflare();
