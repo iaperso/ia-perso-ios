@@ -45,10 +45,8 @@ function retryable(error) {
   return !status || status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-function modelFor(size) {
-  return size >= 1024
-    ? '@cf/black-forest-labs/flux-1-schnell'
-    : '@cf/black-forest-labs/flux-2-klein-4b';
+function modelFor() {
+  return '@cf/black-forest-labs/flux-2-klein-4b';
 }
 
 function extractImage(payload) {
@@ -97,17 +95,11 @@ async function cloudflare({ prompt, size, requestId, fp }) {
     'cf-aig-metadata': JSON.stringify({ app: 'ia-perso', requestId, size, model }),
   };
 
-  let body;
-  if (model.includes('flux-2-klein')) {
-    body = new FormData();
-    body.append('prompt', prompt);
-    body.append('width', String(size));
-    body.append('height', String(size));
-    body.append('seed', String(seedFor(requestId)));
-  } else {
-    headers['Content-Type'] = 'application/json';
-    body = JSON.stringify({ prompt, width: size, height: size, steps: 4, seed: seedFor(requestId) });
-  }
+  const body = new FormData();
+  body.append('prompt', prompt);
+  body.append('width', String(size));
+  body.append('height', String(size));
+  body.append('seed', String(seedFor(requestId)));
 
   const response = await fetchWithTimeout(endpoint, { method: 'POST', headers, body }, CLOUDFLARE_TIMEOUT_MS);
   const text = await response.text();
