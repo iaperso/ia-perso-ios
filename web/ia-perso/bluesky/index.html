@@ -38,5 +38,6 @@ form.addEventListener('submit',function(e){e.preventDefault();search(false)});mo
 zipBtn.addEventListener('click',async function(){if(!posts.length||typeof JSZip==='undefined')return;setBusy(true);zipBtn.textContent='Création du ZIP…';try{var zip=new JSZip(),folder=zip.folder('bluesky-photos'),n=0;for(var p of posts){for(var image of p.images){n++;try{var r=await fetch(image.fullsize);if(!r.ok)continue;folder.file(fileName(p.author.handle,n),await r.blob())}catch(_){}}var blob=await zip.generateAsync({type:'blob'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='bluesky-'+fileName(query.value,1).replace(/-1\.jpg$/,'')+'.zip';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},1500)}finally{zipBtn.textContent='Télécharger tout en ZIP';setBusy(false)}});
 })();
 </script>
+<!-- deploy-refresh 2026-08-09 -->
 </body>
 </html>
